@@ -12,7 +12,6 @@ from app.services.balances import (
 from app.services.ton import get_ton_rub_rate
 from app.utils.formatters import format_rubles
 
-
 # состояния для вывода и переводов (используются и в handlers/text.py)
 pending_withdraw_step: dict[int, str] = {}
 temp_withdraw: dict[int, dict] = {}
@@ -34,24 +33,26 @@ async def format_balance_text(uid: int) -> str:
 
 @dp.message(F.text == "💼 Баланс")
 async def msg_balance(m: types.Message):
-    """
-    Открытие меню баланса по кнопке с нижнего меню.
-    """
+    """Открытие меню баланса по кнопке из нижнего меню."""
     register_user(m.from_user)
     uid = m.from_user.id
     bal_text = await format_balance_text(uid)
 
-    # 🔧 ТУТ ДОБАВЛЕНА КНОПКА ПОМОЩИ ПО БАЛАНСУ
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💎 Пополнить (TON)", callback_data="deposit_menu")],
             [InlineKeyboardButton(text="🔄 Перевод", callback_data="transfer_menu")],
             [InlineKeyboardButton(text="💸 Вывод TON", callback_data="withdraw_menu")],
-            [InlineKeyboardButton(text="🐼 Помощь", callback_data="help_balance")],
+            [
+                InlineKeyboardButton(text="🐼 Помощь", callback_data="help_balance"),
+                InlineKeyboardButton(text="⬅ Назад", callback_data="menu_start"),
+            ],
         ]
     )
     await m.answer(bal_text, reply_markup=kb)
 
+
+# --------------------- ПОПОЛНЕНИЕ ---------------------
 
 @dp.callback_query(F.data == "deposit_menu")
 async def cb_deposit_menu(callback: CallbackQuery):
@@ -72,7 +73,7 @@ async def cb_deposit_menu(callback: CallbackQuery):
         f"2️⃣ Отправьте TON на адрес: <code>{TON_WALLET_ADDRESS}</code>\n"
         f"3️⃣ В комментарии к переводу укажите: <code>ID{uid}</code> (обязательно!).\n"
         "4️⃣ Бот автоматически зачислит ₽ по этому ID и отправит уведомление.\n\n"
-        "Важно: 1 ₽ = 1 рубль (внутренняя валюта бота)."
+        "Важно: 1 внутренняя единица = 1 ₽."
     )
 
     kb = InlineKeyboardMarkup(
@@ -82,6 +83,8 @@ async def cb_deposit_menu(callback: CallbackQuery):
     await callback.message.answer(text, reply_markup=kb)
     await callback.answer()
 
+
+# --------------------- ПЕРЕВОД ---------------------
 
 @dp.callback_query(F.data == "transfer_menu")
 async def cb_transfer_menu(callback: CallbackQuery):
@@ -95,13 +98,15 @@ async def cb_transfer_menu(callback: CallbackQuery):
 
     text = (
         "🔄 Перевод средств другому пользователю\n\n"
-        "1️⃣ Введите @username или ID пользователя.\n"
+        "1️⃣ Введите @username или ID пользователя в следующем сообщении.\n"
         "2️⃣ Затем бот попросит указать сумму перевода.\n\n"
         "Важно: получатель должен хотя бы раз написать боту."
     )
     await callback.message.answer(text)
     await callback.answer()
 
+
+# --------------------- ВЫВОД ---------------------
 
 @dp.callback_query(F.data == "withdraw_menu")
 async def cb_withdraw_menu(callback: CallbackQuery):
@@ -115,13 +120,15 @@ async def cb_withdraw_menu(callback: CallbackQuery):
 
     text = (
         "💸 Вывод TON\n\n"
-        "1️⃣ Отправьте ваш TON-кошелёк (адрес).\n"
+        "1️⃣ Отправьте ваш TON-кошелёк (адрес) в следующем сообщении.\n"
         "2️⃣ Затем бот попросит указать сумму вывода в TON или ₽.\n\n"
         "После этого администратор обработает заявку вручную."
     )
     await callback.message.answer(text)
     await callback.answer()
 
+
+# --------------------- ВСПОМОГАТЕЛЬНОЕ ---------------------
 
 def resolve_user_by_username(username_str: str) -> int | None:
     uname = username_str.strip().lstrip("@").lower()
@@ -131,18 +138,22 @@ def resolve_user_by_username(username_str: str) -> int | None:
     return None
 
 
+# --------------------- ПОМОЩЬ ---------------------
+
 @dp.callback_query(F.data == "help_balance")
 async def cb_help_balance(callback: CallbackQuery):
     text = (
         "💳 *Помощь: Баланс / Вывод*\n\n"
-        "• Пополнение через TON.\n"
-        "• Средства приходят за 5–30 секунд.\n"
+        "• Пополнение только через TON.\n"
+        "• Средства приходят обычно за 5–30 секунд после перевода.\n"
         "• Курс TON подтягивается автоматически.\n"
         "• Комиссия сети оплачивается отправителем.\n"
         "• Переводы доступны только между пользователями бота.\n"
-        "• Вывод обрабатывается администратором вручную.\n"
+        "• Заявки на вывод обрабатываются администратором вручную.\n"
     )
     await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
+
+
 
 
