@@ -2,8 +2,8 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from .pool import pool
-
+# Импортируем pool и новую функцию из pool.py
+from .pool import pool, get_user_registered_at_from_redis # <-- ИЗМЕНЕНО
 
 async def upsert_user(
     uid: int,
@@ -26,14 +26,20 @@ async def upsert_user(
             uid,
             username,
             balance,
-            registered_at.isoformat()
-            if registered_at
-            else datetime.now(timezone.utc).isoformat(),
+            # Asyncpg сам обрабатывает объект datetime для TIMESTAMP WITH TIME ZONE
+            registered_at if registered_at else datetime.now(timezone.utc), # <-- ИЗМЕНЕНО
         )
 
 
 async def get_user_registered_at(uid: int) -> Optional[datetime]:
-    """Получить дату регистрации пользователя."""
+    """Получить дату регистрации пользователя. Сначала из Redis, потом из БД."""
+    
+    # 1. Сначала проверяем Redis (быстрее)
+    redis_date = await get_user_registered_at_from_redis(uid)
+    if redis_date:
+        return redis_date
+        
+    # 2. Если в Redis нет, ищем в Postgres
     if not pool:
         return None
     async with pool.acquire() as db:
@@ -42,8 +48,7 @@ async def get_user_registered_at(uid: int) -> Optional[datetime]:
             uid,
         )
         if row and row["registered_at"]:
-            try:
-                return datetime.fromisoformat(row["registered_at"])
-            except ValueError:
-                return None
-        return None
+            # Asyncpg возвращает datetime объект
+            return row["registered_at"] 
+            
+    return None
