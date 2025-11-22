@@ -141,35 +141,45 @@ async def process_text(m: Message):
         temp_withdraw.pop(uid, None)
         return
 
-    # 4) перевод — выбор получателя
-    if pending_transfer_step.get(uid) == "target":
+        # 4) перевод — выбор получателя
+    if pending_transfer_step.get(uid) == "await_username":
         target_id: int | None = None
+
+        # ввод @username
         if text.startswith("@"):
             target_id = resolve_user_by_username(text)
+
+        # ввод ID
         elif text.isdigit():
             target_id = int(text)
+
+        # ввод просто текста (username без @)
         else:
             target_id = resolve_user_by_username(text)
 
         if not target_id:
             return await m.answer(
-                "Не удалось найти пользователя.\n"
-                "Убедитесь, что он уже писал боту, и введите его ID или @username."
+                "❌ Пользователь не найден.\n"
+                "Убедитесь, что он хотя бы раз писал боту.\n"
+                "Введите его ID или @username."
             )
+
         if target_id == uid:
-            return await m.answer("Нельзя переводить самому себе.")
+            return await m.answer("❌ Нельзя переводить самому себе.")
 
         temp_transfer[uid]["target_id"] = target_id
-        pending_transfer_step[uid] = "amount_transfer"
+        pending_transfer_step[uid] = "await_amount"
+
         return await m.answer("Введите сумму ₽ для перевода (минимум 1):")
 
     # 5) перевод — сумма
-    if pending_transfer_step.get(uid) == "amount_transfer":
+    if pending_transfer_step.get(uid) == "await_amount":
         if not text.isdigit():
             return await m.answer("Введите сумму числом:")
         amount = int(text)
         if amount <= 0:
-            return await m.answer("Сумма должна быть > 0.")
+            return await m.answer("Сумма должна быть больше 0.")
+
         bal = get_balance(uid)
         if amount > bal:
             return await m.answer(
@@ -180,7 +190,7 @@ async def process_text(m: Message):
         if not target_id:
             pending_transfer_step.pop(uid, None)
             temp_transfer.pop(uid, None)
-            return await m.answer("Ошибка: не найден получатель, попробуйте ещё раз.")
+            return await m.answer("Ошибка: получатель не найден, начните заново.")
 
         change_balance(uid, -amount)
         change_balance(target_id, amount)
@@ -192,6 +202,7 @@ async def process_text(m: Message):
             f"Вы отправили {format_rubles(amount)} ₽ пользователю ID {target_id}.\n"
             f"Ваш новый баланс: {format_rubles(get_balance(uid))} ₽."
         )
+
         try:
             await bot.send_message(
                 target_id,
@@ -205,6 +216,7 @@ async def process_text(m: Message):
         temp_transfer.pop(uid, None)
         return
 
+
     # 6) ввод суммы для Банкира
     if pending_raffle_bet_input.get(uid):
         if not text.isdigit():
@@ -215,3 +227,4 @@ async def process_text(m: Message):
         return await m.answer(msg_text)
 
     await m.answer("Используйте меню или /start.")
+
