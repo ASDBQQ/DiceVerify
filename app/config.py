@@ -3,7 +3,7 @@ import os
 from datetime import timedelta
 
 # Оставляем твой реальный токен
-BOT_TOKEN = "8329084308:AAGAsInBx5dJjBU3ijOyoynlvzpxzVGRdFA"
+BOT_TOKEN = "8329084308:AAGsDacIge3lu_O5PyPjKGepwHp4i_jBnWA"
 
 # Оставляем твой реальный TON-адрес
 TON_WALLET_ADDRESS = "UQCzzlkNLsCGqHTUj1zkD_3CVBMoXw-9Od3dRKGgHaBxysYe"
@@ -33,4 +33,5 @@ RAFFLE_CANCEL_WINDOW_SECONDS = 600 # можно отменить свои ста
 # Админы
 MAIN_ADMIN_ID = 7106398341
 ADMIN_IDS = {MAIN_ADMIN_ID, 783924834}
+
 
