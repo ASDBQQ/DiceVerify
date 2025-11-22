@@ -32,27 +32,59 @@ def _schedule_upsert_user(uid: int, registered_at: datetime | None = None):
 
 
 def change_balance(uid: int, delta: int):
-    """Изменить баланс пользователя."""
+    """Изменить баланс и сохранить изменения в БД."""
     get_balance(uid)
     user_balances[uid] += delta
-    _schedule_upsert_user(uid)
+
+    # Сохраняем в PostgreSQL КАЖДЫЙ раз
+    asyncio.create_task(
+        upsert_user(
+            uid,
+            user_usernames.get(uid),
+            user_balances[uid],
+        )
+    )
 
 
 def set_balance(uid: int, value: int):
-    """Установить баланс вручную (админ)."""
+    """Принудительно установить баланс в БД."""
     user_balances[uid] = value
-    _schedule_upsert_user(uid)
+
+    asyncio.create_task(
+        upsert_user(
+            uid,
+            user_usernames.get(uid),
+            user_balances[uid],
+        )
+    )
 
 
 def register_user(user: types.User):
-    """Регистрирует пользователя при первом сообщении."""
     uid = user.id
 
-    # если юзера нет — создаём
+    # Если пользователь впервые — создаём в БД и в кэше
     if uid not in user_balances:
         user_balances[uid] = START_BALANCE_COINS
-        _schedule_upsert_user(uid, datetime.now(timezone.utc))
 
+        asyncio.create_task(
+            upsert_user(
+                uid,
+                user.username,
+                user_balances[uid],
+                datetime.now(timezone.utc),
+            )
+        )
+
+    # Обновляем username при каждом входе
     if user.username:
         user_usernames[uid] = user.username
-        _schedule_upsert_user(uid)
+
+        asyncio.create_task(
+            upsert_user(
+                uid,
+                user.username,
+                user_balances[uid],
+            )
+        )
+
+
