@@ -299,13 +299,20 @@ async def play_game(gid: int):
 
     # 🎲 Перебрасываем, пока не будет победитель
     while True:
-        cr = await telegram_roll(c)
-        orr = await telegram_roll(o)
+        # броски выполняются параллельно
+        creator_roll_msg = await bot.send_dice(c, emoji="🎲")
+        opponent_roll_msg = await bot.send_dice(o, emoji="🎲")
 
-        # Ждём окончания анимации: в telegram_roll уже есть sleep(3)
+        # Значения кубиков
+        cr = creator_roll_msg.dice.value
+        orr = opponent_roll_msg.dice.value
+
+        # ❗ Ждём окончания анимации кубика (3 секунды)
+        await asyncio.sleep(3)
 
         if cr != orr:
-            break  # победитель найден → выходим из цикла
+            break  # победитель найден — выходим из цикла
+        # иначе — переброс (ничья)
 
     g["creator_roll"] = cr
     g["opponent_roll"] = orr
@@ -332,7 +339,7 @@ async def play_game(gid: int):
     # Сохраняем в БД
     await upsert_game(g)
 
-    # Сообщения
+    # Отправляем уведомления игрокам
     for user in (c, o):
         is_creator = (user == c)
         your = cr if is_creator else orr
@@ -360,5 +367,7 @@ async def play_game(gid: int):
         )
 
         await bot.send_message(user, txt)
+
+
 
 
