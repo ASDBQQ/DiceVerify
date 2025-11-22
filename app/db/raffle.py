@@ -1,5 +1,6 @@
 # app/db/raffle.py
-from typing import Any, Dict
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Tuple
 
 from .pool import pool
 
@@ -11,14 +12,15 @@ async def upsert_raffle_round(r: Dict[str, Any]):
     async with pool.acquire() as db:
         await db.execute(
             """
-            INSERT INTO raffle_rounds (created_at, finished_at, winner_id, total_bank)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO raffle_rounds (id, created_at, finished_at, winner_id, total_bank)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT(id) DO UPDATE SET
                 created_at=EXCLUDED.created_at,
                 finished_at=EXCLUDED.finished_at,
                 winner_id=EXCLUDED.winner_id,
                 total_bank=EXCLUDED.total_bank
         """,
+            r.get("id"),
             r["created_at"].isoformat() if r.get("created_at") else None,
             r["finished_at"].isoformat() if r.get("finished_at") else None,
             r.get("winner_id"),
@@ -65,3 +67,45 @@ async def get_user_bets_in_raffle(raffle_id: int, user_id: int) -> int:
             user_id,
         )
         return count if count is not None else 0
+
+
+async def get_raffle_rounds_and_bets_30_days() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Для рейтинга Банкира:
+    - возвращает список раундов за последние 30 дней
+    - и список всех ставок по этим раундам
+    """
+    if not pool:
+        return [], []
+
+    now = datetime.now(timezone.utc)
+    delta_30 = now - timedelta(days=30)
+
+    async with pool.acquire() as db:
+        rounds_records = await db.fetch(
+            """
+            SELECT id, created_at, finished_at, winner_id, total_bank
+            FROM raffle_rounds
+            WHERE finished_at IS NOT NULL AND finished_at >= $1
+        """,
+            delta_30.isoformat(),
+        )
+
+        round_ids = [r["id"] for r in rounds_records]
+        if not round_ids:
+            return [], []
+
+        bets_records = await db.fetch(
+            """
+            SELECT raffle_id, user_id, amount
+            FROM raffle_bets
+            WHERE raffle_id = ANY($1::int[])
+        """,
+            round_ids,
+        )
+
+    rounds = [dict(r) for r in rounds_records]
+    bets = [dict(b) for b in bets_records]
+    return rounds, bets
+
+
