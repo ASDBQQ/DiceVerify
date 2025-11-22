@@ -34,14 +34,20 @@ async def format_balance_text(uid: int) -> str:
 
 @dp.message(F.text == "💼 Баланс")
 async def msg_balance(m: types.Message):
+    """
+    Открытие меню баланса по кнопке с нижнего меню.
+    """
     register_user(m.from_user)
     uid = m.from_user.id
     bal_text = await format_balance_text(uid)
+
+    # 🔧 ТУТ ДОБАВЛЕНА КНОПКА ПОМОЩИ ПО БАЛАНСУ
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💎 Пополнить (TON)", callback_data="deposit_menu")],
             [InlineKeyboardButton(text="🔄 Перевод", callback_data="transfer_menu")],
             [InlineKeyboardButton(text="💸 Вывод TON", callback_data="withdraw_menu")],
+            [InlineKeyboardButton(text="🐼 Помощь", callback_data="help_balance")],
         ]
     )
     await m.answer(bal_text, reply_markup=kb)
@@ -77,39 +83,43 @@ async def cb_deposit_menu(callback: CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(F.data == "withdraw_menu")
-async def cb_withdraw_menu(callback: CallbackQuery):
+@dp.callback_query(F.data == "transfer_menu")
+async def cb_transfer_menu(callback: CallbackQuery):
+    """
+    Старт перевода между пользователями.
+    Дальнейшие шаги обрабатываются в handlers/text.py через pending_transfer_step.
+    """
     uid = callback.from_user.id
-    bal = get_balance(uid)
-    if bal <= 0:
-        await callback.answer("Баланс нулевой.", show_alert=True)
-        return
+    pending_transfer_step[uid] = "await_username"
+    temp_transfer[uid] = {}
 
-    pending_withdraw_step[uid] = "amount"
-    temp_withdraw[uid] = {}
-
-    rate = await get_ton_rub_rate()
-    ton_equiv = bal / rate if rate > 0 else 0
-
-    await callback.message.answer(
-        "💸 Вывод средств в TON\n"
-        f"Ваш баланс: {format_rubles(bal)} ₽ (≈ {ton_equiv:.4f} TON)\n"
-        f"1 TON ≈ {rate:.2f} ₽.\n\n"
-        "Введите сумму ₽ для вывода (целое число):"
+    text = (
+        "🔄 Перевод средств другому пользователю\n\n"
+        "1️⃣ Введите @username или ID пользователя.\n"
+        "2️⃣ Затем бот попросит указать сумму перевода.\n\n"
+        "Важно: получатель должен хотя бы раз написать боту."
     )
+    await callback.message.answer(text)
     await callback.answer()
 
 
-@dp.callback_query(F.data == "transfer_menu")
-async def cb_transfer_menu(callback: CallbackQuery):
+@dp.callback_query(F.data == "withdraw_menu")
+async def cb_withdraw_menu(callback: CallbackQuery):
+    """
+    Старт вывода TON.
+    Дальнейшие шаги обрабатываются в handlers/text.py через pending_withdraw_step.
+    """
     uid = callback.from_user.id
-    pending_transfer_step[uid] = "target"
-    temp_transfer[uid] = {}
-    await callback.message.answer(
-        "🔄 Перевод ₽\n"
-        "Введите ID или @username получателя.\n"
-        "Важно: получатель должен хотя бы раз написать боту."
+    pending_withdraw_step[uid] = "await_ton_wallet"
+    temp_withdraw[uid] = {}
+
+    text = (
+        "💸 Вывод TON\n\n"
+        "1️⃣ Отправьте ваш TON-кошелёк (адрес).\n"
+        "2️⃣ Затем бот попросит указать сумму вывода в TON или ₽.\n\n"
+        "После этого администратор обработает заявку вручную."
     )
+    await callback.message.answer(text)
     await callback.answer()
 
 
@@ -127,8 +137,12 @@ async def cb_help_balance(callback: CallbackQuery):
         "💳 *Помощь: Баланс / Вывод*\n\n"
         "• Пополнение через TON.\n"
         "• Средства приходят за 5–30 секунд.\n"
+        "• Курс TON подтягивается автоматически.\n"
         "• Комиссия сети оплачивается отправителем.\n"
-        "• Вывод возможен через администратора.\n"
+        "• Переводы доступны только между пользователями бота.\n"
+        "• Вывод обрабатывается администратором вручную.\n"
     )
     await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
+
+
