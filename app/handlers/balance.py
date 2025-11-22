@@ -119,3 +119,16 @@ def resolve_user_by_username(username_str: str) -> int | None:
         if uname_stored and uname_stored.lower() == uname:
             return uid
     return None
+
+
+@dp.callback_query(F.data == "help_balance")
+async def cb_help_balance(callback: CallbackQuery):
+    text = (
+        "💳 *Помощь: Баланс / Вывод*\n\n"
+        "• Пополнение через TON.\n"
+        "• Средства приходят за 5–30 секунд.\n"
+        "• Комиссия сети оплачивается отправителем.\n"
+        "• Вывод возможен через администратора.\n"
+    )
+    await callback.message.answer(text, parse_mode="Markdown")
+    await callback.answer()
