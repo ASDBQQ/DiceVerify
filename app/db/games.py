@@ -1,4 +1,9 @@
-from typing import Dict, Any, List, Optional, Tuple
+# app/db/games.py
+from typing import Dict, Any, List, Tuple
+from datetime import datetime, timedelta, timezone
+
+from app.db.pool import pool
+
 
 async def upsert_game(g: Dict[str, Any]):
     """Создать/обновить игру в таблице games."""
@@ -24,7 +29,7 @@ async def upsert_game(g: Dict[str, Any]):
                 created_at=EXCLUDED.created_at,
                 finished_at=EXCLUDED.finished_at
         """,
-            g["id"],                # ← ДОБАВЛЕНО
+            g["id"],                # ID игры из RAM
             g["creator_id"],
             g["opponent_id"],
             g["bet"],
@@ -82,7 +87,7 @@ async def get_user_dice_games_count(uid: int, finished_only: bool = True) -> int
 async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], List[int]]:
     """
     Используется для рейтинга:
-    - возвращает список игр за последние 30 дней
+    - возвращает список ИГР за последние 30 дней
     - и список всех user_id из таблицы users.
     """
     if not pool:
@@ -104,6 +109,8 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         all_uids = [row["user_id"] for row in all_uids_records]
 
     return finished_games, all_uids
+
+
 
 
 
