@@ -1,68 +1,66 @@
 # app/handlers/balance.py
-from aiogram import F, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
-from app.bot import dp, bot
-from app.config import TON_WALLET_ADDRESS
+from aiogram import F
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from app.bot import dp
 from app.services.balances import (
-    register_user,
     get_balance,
+    get_ton_rate,
+    pending_transfer_target,
+    pending_transfer_amount,
     change_balance,
-    user_usernames,
 )
-from app.services.ton import get_ton_rub_rate
-from app.utils.formatters import format_rubles
-from app.utils.keyboards import bottom_menu
-
 from app.services.transfers import add_transfer
-
-# состояния
-pending_withdraw_step: dict[int, str] = {}
-temp_withdraw: dict[int, dict] = {}
-
-pending_transfer_step: dict[int, str] = {}
-temp_transfer: dict[int, dict] = {}
-
-# вспомогательная функция поиска юзера
-def resolve_user_by_username(username_str: str) -> int | None:
-    uname = username_str.strip().lstrip("@").lower()
-    for uid, stored in user_usernames.items():
-        if stored and stored.lower() == uname:
-            return uid
-    return None
+from app.utils.keyboards import bottom_menu
+from app.services.state_reset import reset_user_state
+from app.config import MAIN_ADMIN_ID
 
 
-# форматирование баланса
-async def format_balance_text(uid: int) -> str:
-    bal = get_balance(uid)
-    rate = await get_ton_rub_rate()
-    ton_equiv = bal / rate if rate > 0 else 0
-    return (
-        f"💼 Ваш баланс: {ton_equiv:.4f} TON\n"
-        f"≈ {format_rubles(bal)} ₽\n"
-        f"Текущий курс: 1 TON ≈ {rate:.2f} ₽"
-    )
-
-
-# ===================== ОСНОВНОЕ МЕНЮ БАЛАНСА ============================
 @dp.message(F.text == "💼 Баланс")
-async def msg_balance(m: types.Message):
-    register_user(m.from_user)
-    uid = m.from_user.id
-    text = await format_balance_text(uid)
+async def balance_menu(message: Message):
+    reset_user_state(message.from_user.id)
+
+    bal_rub = get_balance(message.from_user.id)
+    ton_rate = await get_ton_rate()
+    ton_equiv = bal_rub / ton_rate if ton_rate else 0
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 Пополнить (TON)", callback_data="deposit_menu")],
-            [InlineKeyboardButton(text="🔄 Перевод", callback_data="transfer_menu")],
-            [InlineKeyboardButton(text="💸 Вывод TON", callback_data="withdraw_menu")],
-            [
-                InlineKeyboardButton(text="🐼 Помощь", callback_data="help_balance"),
-                InlineKeyboardButton(text="⬅ Назад", callback_data="menu_start"),
-            ],
+            [InlineKeyboardButton(text="💎 Пополнить (TON)", callback_data="topup")],
+            [InlineKeyboardButton(text="💸 Перевод", callback_data="transfer")],
+            [InlineKeyboardButton(text="🐢 Вывод TON", callback_data="withdraw")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back_main")],
         ]
     )
-    await m.answer(text, reply_markup=kb)
+
+    await message.answer(
+        f"📦 Ваш баланс: {ton_equiv:.4f} TON\n"
+        f"≈ {bal_rub} ₽\n"
+        f"Текущий курс: 1 TON = {ton_rate} ₽",
+        reply_markup=kb,
+    )
+
+
+@dp.callback_query(F.data == "back_main")
+async def back_main(callback):
+    reset_user_state(callback.from_user.id)
+    await callback.message.answer("Главное меню:", reply_markup=bottom_menu())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "transfer")
+async def transfer_start(callback):
+    reset_user_state(callback.from_user.id)
+    pending_transfer_target[callback.from_user.id] = True
+
+    await callback.message.answer(
+        "💳 *Перевод средств другому пользователю*\n\n"
+        "1️⃣ Введите @username или ID пользователя.\n"
+        "2️⃣ Затем бот попросит указать сумму.\n\n"
+        "Важно: получатель должен хотя бы раз написать боту.",
+        parse_mode="Markdown",
+    )
+    await callback.answer()
 
 
 # ========================= ПОПОЛНЕНИЕ TON ===============================
@@ -156,6 +154,7 @@ async def cb_balance_back(callback: CallbackQuery):
         reply_markup=bottom_menu()
     )
     await callback.answer()
+
 
 
 
