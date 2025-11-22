@@ -1,11 +1,11 @@
 # app/handlers/games_menu.py
-from datetime import datetime, timezone
-from aiogram import F
+
+from aiogram import F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from datetime import datetime, timezone
 
 from app.bot import dp
-from app.config import DICE_MIN_BET, DICE_BET_MIN_CANCEL_AGE
-from app.services.balances import get_balance, change_balance
+from app.utils.formatters import format_rubles
 from app.services.games import (
     games,
     pending_bet_input,
@@ -15,25 +15,34 @@ from app.services.games import (
     build_user_stats_and_history,
     build_history_keyboard,
     build_rating_text,
-    play_game,
+    play_game
 )
 from app.services.raffle import pending_raffle_bet_input
-from app.utils.formatters import format_rubles
-from app.utils.keyboards import help_menu_keyboard
+from app.services.state_reset import reset_user_state
+from app.services.balances import get_balance, change_balance
+from app.config import DICE_MIN_BET, DICE_BET_MIN_CANCEL_AGE
 
-
-# ---------------------------------------------------------
-#        ВЫБОР РЕЖИМА (КОСТИ / БАНКИР)
-# ---------------------------------------------------------
 
 @dp.callback_query(F.data == "menu_games")
 async def cb_menu_games(callback: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎲 Кости", callback_data="mode_dice")],
-        [InlineKeyboardButton(text="🎩 Банкир", callback_data="mode_banker")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="menu_start")],
-    ])
+    reset_user_state(callback.from_user.id)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎲 Кости", callback_data="mode_dice")],
+            [InlineKeyboardButton(text="🎩 Банкир", callback_data="mode_banker")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back_main")],
+        ]
+    )
     await callback.message.answer("Выберите режим игры:", reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "back_main")
+async def back_main(callback):
+    from app.utils.keyboards import bottom_menu
+    reset_user_state(callback.from_user.id)
+    await callback.message.answer("Главное меню:", reply_markup=bottom_menu())
     await callback.answer()
 
 
@@ -297,6 +306,7 @@ async def cb_help_balance(callback: CallbackQuery):
 @dp.callback_query(F.data == "ignore")
 async def cb_ignore(callback: CallbackQuery):
     await callback.answer()
+
 
 
 
