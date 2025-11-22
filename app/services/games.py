@@ -20,28 +20,33 @@ from app.db.games import (
 from app.services.balances import change_balance, get_balance, user_usernames
 from app.utils.formatters import format_rubles
 
-
 # Активные игры и служебные флаги
 games: Dict[int, Dict[str, Any]] = {}
 pending_bet_input: Dict[int, bool] = {}
 next_game_id: int = 1
 
 
-def build_games_keyboard(uid: int) -> InlineKeyboardMarkup:
-    rows = []
+# =====================================================
+#                     МЕНЮ ИГР
+# =====================================================
 
+def build_games_keyboard(uid: int) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+
+    # верхний ряд — создать / обновить
     rows.append(
         [
-            InlineKeyboardButton(text="✅Создать игру", callback_data="create_game"),
-            InlineKeyboardButton(text="🔄Обновить", callback_data="refresh_games"),
+            InlineKeyboardButton(text="✅ Создать игру", callback_data="create_game"),
+            InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh_games"),
         ]
     )
 
-    active = [g for g in games.values() if g["opponent_id"] is None]
+    # активные игры (без соперника)
+    active = [g for g in games.values() if g.get("opponent_id") is None]
     active.sort(key=lambda x: x["id"], reverse=True)
 
     for g in active:
-        txt = f"🎲Игра #{g['id']} | {format_rubles(g['bet'])} ₽"
+        txt = f"🎲 Игра №{g['id']} | {format_rubles(g['bet'])} ₽"
         if g["creator_id"] == uid:
             rows.append(
                 [
@@ -55,6 +60,7 @@ def build_games_keyboard(uid: int) -> InlineKeyboardMarkup:
                 [InlineKeyboardButton(text=txt, callback_data=f"game_open:{g['id']}")]
             )
 
+    # мои игры / рейтинг
     rows.append(
         [
             InlineKeyboardButton(text="📋 Мои игры", callback_data="my_games:0"),
@@ -62,7 +68,7 @@ def build_games_keyboard(uid: int) -> InlineKeyboardMarkup:
         ]
     )
 
-    # 🔧 ТУТ ГЛАВНОЕ: помощь теперь только по костям
+    # ВАЖНО: помощь ТОЛЬКО по костям
     rows.append(
         [
             InlineKeyboardButton(text="🎮 Игры", callback_data="menu_games"),
@@ -85,25 +91,42 @@ async def send_games_list(chat_id: int, uid: int):
     )
 
 
+# =====================================================
+#               ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# =====================================================
+
 def calculate_profit(uid: int, g: Dict[str, Any]) -> int:
+    """
+    Сколько пользователь заработал/проиграл в конкретной игре.
+    Положительное число = профит, отрицательное = убыток.
+    """
     bet = g["bet"]
-    if g["winner"] == "draw":
+    winner = g.get("winner")
+
+    if winner == "draw":
         return 0
+
     creator = uid == g["creator_id"]
-    if g["winner"] == "creator" and creator:
+
+    if winner == "creator" and creator:
         return bet
-    if g["winner"] == "opponent" and not creator:
+    if winner == "opponent" and not creator:
         return bet
-    if g["winner"] == "creator" and not creator:
+    if winner == "creator" and not creator:
         return -bet
-    if g["winner"] == "opponent" and creator:
+    if winner == "opponent" and creator:
         return -bet
+
     return 0
 
 
 async def build_user_stats_and_history(
     uid: int,
 ) -> tuple[str, List[Dict[str, Any]]]:
+    """
+    Статистика и история игр пользователя.
+    История берётся из БД → get_user_games.
+    """
     finished = await get_user_games(uid)
     finished = finished[:HISTORY_LIMIT]
 
@@ -116,9 +139,10 @@ async def build_user_stats_and_history(
     now = datetime.now(timezone.utc)
 
     for g in finished:
-        finished_at = g["finished_at"]
+        finished_at = g.get("finished_at")
         if not finished_at:
             continue
+
         if isinstance(finished_at, str):
             finished_at = datetime.fromisoformat(finished_at)
         if finished_at.tzinfo is None:
@@ -149,23 +173,21 @@ async def build_user_stats_and_history(
         f"└ 💸 Профит: {ps(stats['day']['profit'])} ₽"
     )
 
+    # История
     history: List[Dict[str, Any]] = []
     for g in finished[:HISTORY_LIMIT]:
         creator = g["creator_id"] == uid
         opp_id = g["opponent_id"] if creator else g["creator_id"]
         opp_name = user_usernames.get(opp_id, f"ID{opp_id}")
         bet = g["bet"]
-        res = g["winner"]
+        profit = calculate_profit(uid, g)
 
-        if res == "draw":
-            emoji = "🤝"
-            text = f"Ничья с {opp_name} ({format_rubles(bet)} ₽)"
-        elif (res == "creator" and creator) or (res == "opponent" and not creator):
-            emoji = "✅"
-            text = f"Победа над {opp_name} (+{format_rubles(bet)} ₽)"
+        if profit > 0:
+            emoji, text = "✅", f"Победа над {opp_name} (+{format_rubles(profit)} ₽)"
+        elif profit < 0:
+            emoji, text = "❌", f"Поражение от {opp_name} ({format_rubles(profit)} ₽)"
         else:
-            emoji = "❌"
-            text = f"Поражение от {opp_name} (-{format_rubles(bet)} ₽)"
+            emoji, text = "🤝", f"Ничья с {opp_name}"
 
         my = g["creator_roll"] if creator else g["opponent_roll"]
         opp = g["opponent_roll"] if creator else g["creator_roll"]
@@ -180,7 +202,7 @@ async def build_user_stats_and_history(
 def build_history_keyboard(
     history: List[Dict[str, Any]], page: int
 ) -> InlineKeyboardMarkup:
-    rows = []
+    rows: List[List[InlineKeyboardButton]] = []
 
     total = len(history)
     if total == 0:
@@ -203,7 +225,7 @@ def build_history_keyboard(
         )
         rows.append([InlineKeyboardButton(text=text, callback_data="ignore")])
 
-    nav_row = []
+    nav_row: List[InlineKeyboardButton] = []
     if page > 0:
         nav_row.append(
             InlineKeyboardButton(text="⬅️ Назад", callback_data=f"my_games:{page - 1}")
@@ -220,46 +242,84 @@ def build_history_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+# =====================================================
+#                     РЕЙТИНГ
+# =====================================================
+
 async def build_rating_text(requesting_uid: int) -> str:
-    stats = await get_users_profit_and_games_30_days()
-    if not stats:
+    """
+    Строим рейтинг, учитывая, что get_users_profit_and_games_30_days()
+    возвращает КОРТЕЖ: (finished_games, all_uids)
+    """
+    now = datetime.now(timezone.utc)
+    finished_games, all_uids = await get_users_profit_and_games_30_days()
+
+    user_stats: Dict[int, Dict[str, int]] = {}
+
+    # собираем профит и количество игр по каждому пользователю
+    for g in finished_games:
+        finished_at = g.get("finished_at")
+        if isinstance(finished_at, str):
+            finished_at = datetime.fromisoformat(finished_at)
+
+        if not finished_at:
+            continue
+        if finished_at.tzinfo is None:
+            finished_at = finished_at.replace(tzinfo=timezone.utc)
+
+        if (now - finished_at) > timedelta(days=30):
+            continue
+
+        for uid in (g["creator_id"], g["opponent_id"]):
+            if uid is None:
+                continue
+            stats = user_stats.setdefault(uid, {"profit": 0, "games": 0})
+            stats["profit"] += calculate_profit(uid, g)
+            stats["games"] += 1
+
+    if not user_stats:
         return "🏆 Рейтинг пока пуст — за последние 30 дней не было завершённых игр."
 
+    # сортировка по профиту, при равном профите — по количеству игр
     sorted_stats = sorted(
-        stats.items(), key=lambda x: (x[1]["profit"], -x[1]["games"]), reverse=True
+        user_stats.items(),
+        key=lambda x: (x[1]["profit"], -x[1]["games"]),
+        reverse=True,
     )
 
-    lines = ["🏆 ТОП-3 игроков в кости за последние 30 дней:\n"]
+    top_list = sorted_stats[:3]
     medals = ["🥇", "🥈", "🥉"]
+    top_lines: List[str] = []
 
-    for i, (uid, s) in enumerate(sorted_stats[:3]):
+    for i, (uid, s) in enumerate(top_list):
         username = user_usernames.get(uid) or f"ID{uid}"
         profit = s["profit"]
         games_count = s["games"]
         sign = "+" if profit > 0 else ""
-        lines.append(
+        top_lines.append(
             f"{medals[i]} {username} — {sign}{format_rubles(profit)} ₽ за {games_count} игр"
         )
 
-    # найти место запрашивающего игрока
-    user_place = None
     total_players = len(sorted_stats)
-    user_profit = stats.get(requesting_uid, {"profit": 0, "games": 0})
+    user_place = None
+    user_profit = user_stats.get(requesting_uid, {"profit": 0, "games": 0})
 
     for i, (uid, _) in enumerate(sorted_stats):
         if uid == requesting_uid:
             user_place = i + 1
             break
 
+    lines: List[str] = ["🏆 ТОП 3 игроков в кости:\n"]
+    lines.extend(top_lines)
     lines.append("\n")
 
     if user_place:
-        profit = format_rubles(user_profit["profit"])
+        profit_str = format_rubles(user_profit["profit"])
         games_count = user_profit["games"]
         sign = "+" if user_profit["profit"] >= 0 else ""
         lines.append(
             f"Ваше место в рейтинге: {user_place} из {total_players} "
-            f"({sign}{profit} ₽ за {games_count} игр)"
+            f"({sign}{profit_str} ₽ за {games_count} игр)"
         )
     else:
         games_count_total = await get_user_dice_games_count(requesting_uid)
@@ -277,10 +337,17 @@ async def build_rating_text(requesting_uid: int) -> str:
     return "\n".join(lines)
 
 
+# =====================================================
+#                 ЛОГИКА ИГРЫ В КОСТИ
+# =====================================================
+
 async def telegram_roll(uid: int) -> int:
+    """
+    Бросок кубика через Telegram.
+    (Функция оставлена для совместимости, вдруг где-то используется)
+    """
     msg = await bot.send_dice(uid, emoji="🎲")
-    # Если захочешь — можно добавить задержку здесь
-    # await asyncio.sleep(3)
+    await asyncio.sleep(3)  # ждём анимацию
     return msg.dice.value
 
 
@@ -301,20 +368,17 @@ async def play_game(gid: int):
 
     # 🎲 Перебрасываем, пока не будет победитель
     while True:
-        # броски выполняются параллельно
         creator_roll_msg = await bot.send_dice(c, emoji="🎲")
         opponent_roll_msg = await bot.send_dice(o, emoji="🎲")
 
-        # Значения кубиков
+        # ждём завершения анимации (2.5–3 секунды)
+        await asyncio.sleep(3)
+
         cr = creator_roll_msg.dice.value
         orr = opponent_roll_msg.dice.value
 
-        # ❗ Ждём окончания анимации кубика (примерно 3 секунды)
-        await asyncio.sleep(3)
-
         if cr != orr:
-            break  # победитель найден — выходим из цикла
-        # иначе — ничья, перебрасываем
+            break  # победитель найден, выходим из цикла (иначе переброс)
 
     g["creator_roll"] = cr
     g["opponent_roll"] = orr
@@ -325,7 +389,6 @@ async def play_game(gid: int):
     commission = bank // 100
     prize = bank - commission
 
-    # 🏆 Победитель
     if cr > orr:
         winner = "creator"
         change_balance(c, prize)
@@ -333,15 +396,13 @@ async def play_game(gid: int):
         winner = "opponent"
         change_balance(o, prize)
 
-    # Комиссия админу
     change_balance(MAIN_ADMIN_ID, commission)
-
     g["winner"] = winner
 
-    # Сохраняем в БД
+    # сохраняем в БД
     await upsert_game(g)
 
-    # Отправляем уведомления игрокам
+    # отправляем результат обоим игрокам
     for user in (c, o):
         is_creator = user == c
         your = cr if is_creator else orr
@@ -351,7 +412,7 @@ async def play_game(gid: int):
             "🥳 Поздравляем с победой!"
             if (winner == "creator" and is_creator)
             or (winner == "opponent" and not is_creator)
-            else "😔 К сожалению, вы проиграли!"
+            else "😔 К сожалению, вы проиграли."
         )
 
         bank_text = (
@@ -369,6 +430,8 @@ async def play_game(gid: int):
         )
 
         await bot.send_message(user, txt)
+
+
 
 
 
