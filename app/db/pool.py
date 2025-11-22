@@ -1,24 +1,35 @@
 # app/db/pool.py
 import os
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Optional, Dict, Any
 
 import asyncpg
+import aioredis # <-- НОВОЕ
 
-
-# Глобальный пул подключений к PostgreSQL
+# Глобальный пул подключений к PostgreSQL и Redis
 pool: asyncpg.Pool | None = None
+redis_pool: aioredis.Redis | None = None # <-- НОВОЕ
 
 
-async def init_db(
-    user_balances: Dict[int, int],
-    user_usernames: Dict[int, str],
-    processed_ton_tx: set[str],
-):
-    """Инициализация пула подключений и создание таблиц + загрузка кэша."""
-    global pool
+async def get_user_registered_at_from_redis(uid: int) -> Optional[datetime]:
+    """Вспомогательная функция: Получить дату регистрации из Redis."""
+    if not redis_pool:
+        return None
+    date_str_bytes = await redis_pool.get(f"registered_at:{uid}")
+    if date_str_bytes:
+        try:
+            return datetime.fromisoformat(date_str_bytes.decode())
+        except ValueError:
+            pass
+    return None
+
+
+async def init_db(): # <-- ИЗМЕНЕНО: Убраны аргументы
+    """Инициализация пулов подключений и создание таблиц + загрузка кэша в Redis."""
+    global pool, redis_pool
 
     DATABASE_URL = os.environ.get("DATABASE_URL")
+    REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost") # <-- НОВОЕ
     if not DATABASE_URL:
         raise Exception(
             "Переменная окружения DATABASE_URL не найдена. "
@@ -26,6 +37,8 @@ async def init_db(
         )
 
     pool = await asyncpg.create_pool(DATABASE_URL)
+    # Инициализация Redis
+    redis_pool = await aioredis.from_url(REDIS_URL) # <-- НОВОЕ
 
     async with pool.acquire() as db:
         # 1. Таблица users
@@ -35,7 +48,7 @@ async def init_db(
                 user_id BIGINT PRIMARY KEY,
                 username TEXT,
                 balance INTEGER,
-                registered_at TEXT
+                registered_at TIMESTAMP WITH TIME ZONE -- <-- ИЗМЕНЕНО: был TEXT
             )
         """
         )
@@ -51,9 +64,9 @@ async def init_db(
                 creator_roll INTEGER,
                 opponent_roll INTEGER,
                 winner TEXT,
-                finished INTEGER,
-                created_at TEXT,
-                finished_at TEXT
+                finished SMALLINT,
+                created_at TIMESTAMP WITH TIME ZONE, -- <-- ИЗМЕНЕНО: был TEXT
+                finished_at TIMESTAMP WITH TIME ZONE -- <-- ИЗМЕНЕНО: был TEXT
             )
         """
         )
@@ -63,15 +76,15 @@ async def init_db(
             """
             CREATE TABLE IF NOT EXISTS raffle_rounds (
                 id SERIAL PRIMARY KEY,
-                created_at TEXT,
-                finished_at TEXT,
+                created_at TIMESTAMP WITH TIME ZONE, -- <-- ИЗМЕНЕНО: был TEXT
+                finished_at TIMESTAMP WITH TIME ZONE, -- <-- ИЗМЕНЕНО: был TEXT
                 winner_id BIGINT,
                 total_bank INTEGER
             )
         """
         )
 
-        # 4. Таблица raffle_bets
+        # 4. Таблица raffle_bets (без изменений)
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS raffle_bets (
@@ -92,7 +105,7 @@ async def init_db(
                 ton_amount REAL,
                 coins INTEGER,
                 comment TEXT,
-                at TEXT
+                at TIMESTAMP WITH TIME ZONE -- <-- ИЗМЕНЕНО: был TEXT
             )
         """
         )
@@ -105,21 +118,32 @@ async def init_db(
                 from_id BIGINT,
                 to_id BIGINT,
                 amount INTEGER,
-                at TEXT
+                at TIMESTAMP WITH TIME ZONE -- <-- ИЗМЕНЕНО: был TEXT
             )
         """
         )
 
-        # 7. Загрузка пользователей в память
-        records = await db.fetch("SELECT user_id, username, balance FROM users")
+        # 7. Загрузка пользователей в Redis (Миграция данных из PostgreSQL)
+        records = await db.fetch("SELECT user_id, username, balance, registered_at FROM users")
         for record in records:
             uid = record["user_id"]
             username = record["username"]
             balance = record["balance"]
-            user_balances[uid] = balance
-            user_usernames[uid] = username
+            registered_at = record["registered_at"]
+            
+            # Сохраняем в Redis
+            await redis_pool.set(f"balance:{uid}", balance)
+            if username:
+                await redis_pool.set(f"username:{uid}", username)
+            if registered_at:
+                await redis_pool.set(f"registered_at:{uid}", registered_at.isoformat())
 
-        # 8. Загрузка обработанных TON-транзакций
+        # 8. Загрузка обработанных TON-транзакций (Миграция)
         records = await db.fetch("SELECT tx_hash FROM ton_deposits")
         for record in records:
-            processed_ton_tx.add(record["tx_hash"])
+            # Загружаем в Redis Set
+            await redis_pool.sadd("processed_ton_tx", record["tx_hash"])
+        
+        # 9. Инициализация глобальных ID (для дальнейших правок games.py и raffle.py)
+        await redis_pool.setnx("next_game_id", 1)
+        await redis_pool.setnx("next_raffle_id", 1)
