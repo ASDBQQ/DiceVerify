@@ -1,7 +1,7 @@
 # app/services/raffle.py
 import asyncio
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta   # ← ДОБАВИТЬ timedelta
 from typing import Dict, Any, Set
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -279,3 +279,4 @@ async def perform_raffle_draw():
             await bot.send_message(uid, common_part + personal + balance_line)
         except Exception:
             pass
+
