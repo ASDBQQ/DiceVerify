@@ -1,3 +1,5 @@
+from typing import Dict, Any
+
 async def upsert_game(g: Dict[str, Any]):
     """Создать/обновить игру в таблице games."""
     if not pool:
@@ -102,4 +104,5 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         all_uids = [row["user_id"] for row in all_uids_records]
 
     return finished_games, all_uids
+
 
