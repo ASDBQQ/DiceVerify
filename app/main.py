@@ -3,10 +3,9 @@ import asyncio
 
 from app.bot import bot, dp
 from app.db.pool import init_db
-from app.services.balances import user_balances, user_usernames
-from app.services.ton import ton_deposit_worker, processed_ton_tx
-
-# Импортируем хендлеры (они регистрируются через декораторы)
+# УДАЛЕНЫ: from app.services.balances import user_balances, user_usernames
+# УДАЛЕНЫ: from app.services.ton import processed_ton_tx
+from app.services.ton import ton_deposit_worker
 from app.handlers import (
     start, profile, balance, admin,
     games_menu, raffle_menu, text
@@ -16,8 +15,8 @@ from app.handlers import (
 async def main():
     print("🚀 Бот запущен!")
 
-    # Инициализация базы
-    await init_db(user_balances, user_usernames, processed_ton_tx)
+    # Инициализация базы и Redis. Аргументы больше не нужны.
+    await init_db()
 
     # TON-пополнения — запускаем воркер
     asyncio.create_task(ton_deposit_worker())
