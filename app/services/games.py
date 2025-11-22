@@ -364,5 +364,5 @@ async def play_game(gid: int):
         )
 
         await bot.send_message(user, txt)
-)
+
 
