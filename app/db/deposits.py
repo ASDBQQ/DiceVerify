@@ -25,5 +25,5 @@ async def add_ton_deposit(
             ton_amount,
             coins,
             comment,
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(timezone.utc), # <-- ИЗМЕНЕНО: теперь объект datetime, а не строка isoformat()
         )
