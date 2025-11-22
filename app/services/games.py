@@ -297,57 +297,62 @@ async def play_game(gid: int):
     o = g["opponent_id"]
     bet = g["bet"]
 
-    cr = await telegram_roll(c)
-    orr = await telegram_roll(o)
+    # 🎲 ПЕРЕБРОСЫ ДО ПОБЕДЫ
+    while True:
+        # Отправляем кубики
+        creator_msg = await bot.send_dice(c, emoji="🎲")
+        opponent_msg = await bot.send_dice(o, emoji="🎲")
 
+        # Ждём завершения анимации (~3 сек)
+        await asyncio.sleep(3)
+
+        cr = creator_msg.dice.value
+        orr = opponent_msg.dice.value
+
+        if cr != orr:
+            break  # победитель найден
+        # иначе — ничья → перебрасываем снова
+
+    # Сохраняем успешный бросок
     g["creator_roll"] = cr
     g["opponent_roll"] = orr
     g["finished"] = True
     g["finished_at"] = datetime.now(timezone.utc)
 
     bank = bet * 2
+    commission = bank // 100
+    prize = bank - commission
 
+    # Определяем победителя
     if cr > orr:
         winner = "creator"
-        commission = bank // 100
-        prize = bank - commission
         change_balance(c, prize)
         change_balance(MAIN_ADMIN_ID, commission)
-    elif orr > cr:
+    else:
         winner = "opponent"
-        commission = bank // 100
-        prize = bank - commission
         change_balance(o, prize)
         change_balance(MAIN_ADMIN_ID, commission)
-    else:
-        winner = "draw"
-        change_balance(c, bet)
-        change_balance(o, bet)
-        commission = 0
 
     g["winner"] = winner
 
+    # сохраняем итог в БД
     await upsert_game(g)
 
+    # Рассылка результата
     for user in (c, o):
         is_creator = user == c
         your = cr if is_creator else orr
         their = orr if is_creator else cr
 
-        if winner == "draw":
-            result_text = "🤝 Ничья!"
-            bank_text = f"💰 Банк: {format_rubles(bank)} ₽ (вернули ставки)"
+        if (winner == "creator" and is_creator) or (winner == "opponent" and not is_creator):
+            result_text = "🥳 Поздравляем с победой!"
         else:
-            if (winner == "creator" and is_creator) or (
-                winner == "opponent" and not is_creator
-            ):
-                result_text = "🥳 Поздравляем с победой!"
-            else:
-                result_text = "😔 К сожалению, вы проиграли!"
-            bank_text = (
-                f"💰 Банк: {format_rubles(bank)} ₽\n"
-                f"💸 Комиссия: {format_rubles(commission)} ₽ (1%)"
-            )
+            result_text = "😔 К сожалению, вы проиграли!"
+
+        bank_text = (
+            f"💰 Банк: {format_rubles(bank)} ₽\n"
+            f"💸 Комиссия: {format_rubles(commission)} ₽ (1%)"
+        )
 
         txt = (
             f"🏁 Кости #{gid}\n"
@@ -359,3 +364,5 @@ async def play_game(gid: int):
         )
 
         await bot.send_message(user, txt)
+)
+
