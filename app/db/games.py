@@ -108,3 +108,12 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         all_uids = [row["user_id"] for row in all_uids_records]
 
     return finished_games, all_uids
+
+
+async def get_unfinished_games() -> List[Dict[str, Any]]:
+    """Получить незавершённые игры для восстановления при старте."""
+    if not pool:
+        return []
+    async with pool.acquire() as db:
+        records = await db.fetch("SELECT * FROM games WHERE finished = 0")
+        return [dict(r) for r in records]
