@@ -62,10 +62,11 @@ def build_games_keyboard(uid: int) -> InlineKeyboardMarkup:
         ]
     )
 
+    # 🔧 ТУТ ГЛАВНОЕ: помощь теперь только по костям
     rows.append(
         [
             InlineKeyboardButton(text="🎮 Игры", callback_data="menu_games"),
-            InlineKeyboardButton(text="🐼 Помощь", callback_data="help"),
+            InlineKeyboardButton(text="🐼 Помощь", callback_data="help_dice"),
         ]
     )
 
@@ -93,12 +94,18 @@ def calculate_profit(uid: int, g: Dict[str, Any]) -> int:
         return bet
     if g["winner"] == "opponent" and not creator:
         return bet
-    return -bet
+    if g["winner"] == "creator" and not creator:
+        return -bet
+    if g["winner"] == "opponent" and creator:
+        return -bet
+    return 0
 
 
-async def build_user_stats_and_history(uid: int):
-    now = datetime.now(timezone.utc)
+async def build_user_stats_and_history(
+    uid: int,
+) -> tuple[str, List[Dict[str, Any]]]:
     finished = await get_user_games(uid)
+    finished = finished[:HISTORY_LIMIT]
 
     stats = {
         "month": {"games": 0, "profit": 0},
@@ -106,22 +113,29 @@ async def build_user_stats_and_history(uid: int):
         "day": {"games": 0, "profit": 0},
     }
 
-    for g in finished:
-        if not g.get("finished_at"):
-            continue
-        finished_at = datetime.fromisoformat(g["finished_at"])
-        delta = now - finished_at
-        p = calculate_profit(uid, g)
+    now = datetime.now(timezone.utc)
 
-        if delta <= timedelta(days=30):
+    for g in finished:
+        finished_at = g["finished_at"]
+        if not finished_at:
+            continue
+        if isinstance(finished_at, str):
+            finished_at = datetime.fromisoformat(finished_at)
+        if finished_at.tzinfo is None:
+            finished_at = finished_at.replace(tzinfo=timezone.utc)
+
+        diff = now - finished_at
+        profit = calculate_profit(uid, g)
+
+        if diff <= timedelta(days=30):
             stats["month"]["games"] += 1
-            stats["month"]["profit"] += p
-        if delta <= timedelta(days=7):
+            stats["month"]["profit"] += profit
+        if diff <= timedelta(days=7):
             stats["week"]["games"] += 1
-            stats["week"]["profit"] += p
-        if delta <= timedelta(days=1):
+            stats["week"]["profit"] += profit
+        if diff <= timedelta(days=1):
             stats["day"]["games"] += 1
-            stats["day"]["profit"] += p
+            stats["day"]["profit"] += profit
 
     def ps(v: int) -> str:
         return ("+" if v > 0 else "") + format_rubles(v)
@@ -137,39 +151,41 @@ async def build_user_stats_and_history(uid: int):
 
     history: List[Dict[str, Any]] = []
     for g in finished[:HISTORY_LIMIT]:
-        if uid == g["creator_id"]:
-            my = g["creator_roll"]
-            opp = g["opponent_roll"]
-        else:
-            my = g["opponent_roll"]
-            opp = g["creator_roll"]
+        creator = g["creator_id"] == uid
+        opp_id = g["opponent_id"] if creator else g["creator_id"]
+        opp_name = user_usernames.get(opp_id, f"ID{opp_id}")
+        bet = g["bet"]
+        res = g["winner"]
 
-        profit = calculate_profit(uid, g)
-        if profit > 0:
-            emoji, text = "🟩", "Победа"
-        elif profit < 0:
-            emoji, text = "🟥", "Проигрыш"
+        if res == "draw":
+            emoji = "🤝"
+            text = f"Ничья с {opp_name} ({format_rubles(bet)} ₽)"
+        elif (res == "creator" and creator) or (res == "opponent" and not creator):
+            emoji = "✅"
+            text = f"Победа над {opp_name} (+{format_rubles(bet)} ₽)"
         else:
-            emoji, text = "⚪", "Ничья"
+            emoji = "❌"
+            text = f"Поражение от {opp_name} (-{format_rubles(bet)} ₽)"
+
+        my = g["creator_roll"] if creator else g["opponent_roll"]
+        opp = g["opponent_roll"] if creator else g["creator_roll"]
 
         history.append(
-            {"bet": g["bet"], "emoji": emoji, "text": text, "my": my, "opp": opp}
+            {"bet": bet, "emoji": emoji, "text": text, "my": my, "opp": opp}
         )
 
     return stats_text, history
 
 
-def build_history_keyboard(history: List[Dict[str, Any]], page: int) -> InlineKeyboardMarkup:
+def build_history_keyboard(
+    history: List[Dict[str, Any]], page: int
+) -> InlineKeyboardMarkup:
     rows = []
 
     total = len(history)
     if total == 0:
-        rows.append(
-            [InlineKeyboardButton(text="История пуста", callback_data="ignore")]
-        )
-        rows.append(
-            [InlineKeyboardButton(text="🎮 Игры", callback_data="menu_games")]
-        )
+        rows.append([InlineKeyboardButton(text="История пуста", callback_data="ignore")])
+        rows.append([InlineKeyboardButton(text="🎮 Игры", callback_data="menu_games")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     pages = (total + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE
@@ -181,87 +197,65 @@ def build_history_keyboard(history: List[Dict[str, Any]], page: int) -> InlineKe
     for h in history[start:end]:
         text = (
             f"{format_rubles(h['bet'])} ₽ | "
-            f"{h['emoji']} {h['text']} | {h['my']}:{h['opp']}"
+            f"{h['emoji']} | "
+            f"Вы: {h['my']} | "
+            f"Соперник: {h['opp']}"
         )
         rows.append([InlineKeyboardButton(text=text, callback_data="ignore")])
 
-    if pages > 1:
-        rows.append(
-            [
-                InlineKeyboardButton(text="<<", callback_data="my_games:0"),
-                InlineKeyboardButton(
-                    text="<", callback_data=f"my_games:{max(0, page - 1)}"
-                ),
-                InlineKeyboardButton(
-                    text=f"{page + 1}/{pages}", callback_data="ignore"
-                ),
-                InlineKeyboardButton(
-                    text=">", callback_data=f"my_games:{min(pages - 1, page + 1)}"
-                ),
-                InlineKeyboardButton(
-                    text=">>", callback_data=f"my_games:{pages - 1}"
-                ),
-            ]
+    nav_row = []
+    if page > 0:
+        nav_row.append(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"my_games:{page - 1}")
         )
+    if page < pages - 1:
+        nav_row.append(
+            InlineKeyboardButton(text="➡️ Вперёд", callback_data=f"my_games:{page + 1}")
+        )
+    if nav_row:
+        rows.append(nav_row)
 
     rows.append([InlineKeyboardButton(text="🎮 Игры", callback_data="menu_games")])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def build_rating_text(requesting_uid: int) -> str:
-    now = datetime.now(timezone.utc)
-    finished_games, all_uids = await get_users_profit_and_games_30_days()
+    stats = await get_users_profit_and_games_30_days()
+    if not stats:
+        return "🏆 Рейтинг пока пуст — за последние 30 дней не было завершённых игр."
 
-    user_stats: Dict[int, Dict[str, int]] = {}
-
-    for g in finished_games:
-        finished_at = datetime.fromisoformat(g["finished_at"])
-        if (now - finished_at) > timedelta(days=30):
-            continue
-
-        for uid in (g["creator_id"], g["opponent_id"]):
-            if uid is None:
-                continue
-            stats = user_stats.setdefault(uid, {"profit": 0, "games": 0})
-            stats["profit"] += calculate_profit(uid, g)
-            stats["games"] += 1
-
-    top_list = sorted(
-        user_stats.items(),
-        key=lambda x: (x[1]["profit"], -x[1]["games"]),
-        reverse=True,
+    sorted_stats = sorted(
+        stats.items(), key=lambda x: (x[1]["profit"], -x[1]["games"]), reverse=True
     )
 
-    top_lines = []
-    place_emoji = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 ТОП-3 игроков в кости за последние 30 дней:\n"]
+    medals = ["🥇", "🥈", "🥉"]
 
-    for i, (uid, stats) in enumerate(top_list[:3]):
-        profit = format_rubles(stats["profit"])
-        games_count = format_rubles(stats["games"])
+    for i, (uid, s) in enumerate(sorted_stats[:3]):
         username = user_usernames.get(uid) or f"ID{uid}"
-        top_lines.append(
-            f"{place_emoji[i]} {username} - {profit} ₽ за {games_count} игр"
+        profit = s["profit"]
+        games_count = s["games"]
+        sign = "+" if profit > 0 else ""
+        lines.append(
+            f"{medals[i]} {username} — {sign}{format_rubles(profit)} ₽ за {games_count} игр"
         )
 
-    if not top_lines:
-        return "🏆 Рейтинг пока пуст — ещё нет завершённых игр за 30 дней."
-
+    # найти место запрашивающего игрока
     user_place = None
-    total_players = len(top_list)
-    user_profit = user_stats.get(requesting_uid, {"profit": 0, "games": 0})
+    total_players = len(sorted_stats)
+    user_profit = stats.get(requesting_uid, {"profit": 0, "games": 0})
 
-    for i, (uid, stats) in enumerate(top_list):
+    for i, (uid, _) in enumerate(sorted_stats):
         if uid == requesting_uid:
             user_place = i + 1
             break
 
-    lines = ["🏆 ТОП 3 игроков в кости:\n"]
-    lines.extend(top_lines)
     lines.append("\n")
 
     if user_place:
         profit = format_rubles(user_profit["profit"])
-        games_count = format_rubles(user_profit["games"])
+        games_count = user_profit["games"]
         sign = "+" if user_profit["profit"] >= 0 else ""
         lines.append(
             f"Ваше место в рейтинге: {user_place} из {total_players} "
@@ -285,11 +279,18 @@ async def build_rating_text(requesting_uid: int) -> str:
 
 async def telegram_roll(uid: int) -> int:
     msg = await bot.send_dice(uid, emoji="🎲")
-    # В оригинале было небольшое ожидание
+    # Если захочешь — можно добавить задержку здесь
+    # await asyncio.sleep(3)
     return msg.dice.value
 
 
 async def play_game(gid: int):
+    """
+    Логика игры в кости:
+    - бросок кубика каждому
+    - при ничьей — переброс
+    - результат показывается ПОСЛЕ окончания анимации
+    """
     g = games.get(gid)
     if not g:
         return
@@ -308,12 +309,12 @@ async def play_game(gid: int):
         cr = creator_roll_msg.dice.value
         orr = opponent_roll_msg.dice.value
 
-        # ❗ Ждём окончания анимации кубика (3 секунды)
+        # ❗ Ждём окончания анимации кубика (примерно 3 секунды)
         await asyncio.sleep(3)
 
         if cr != orr:
             break  # победитель найден — выходим из цикла
-        # иначе — переброс (ничья)
+        # иначе — ничья, перебрасываем
 
     g["creator_roll"] = cr
     g["opponent_roll"] = orr
@@ -342,7 +343,7 @@ async def play_game(gid: int):
 
     # Отправляем уведомления игрокам
     for user in (c, o):
-        is_creator = (user == c)
+        is_creator = user == c
         your = cr if is_creator else orr
         their = orr if is_creator else cr
 
@@ -368,6 +369,7 @@ async def play_game(gid: int):
         )
 
         await bot.send_message(user, txt)
+
 
 
 
