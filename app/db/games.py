@@ -35,14 +35,15 @@ async def upsert_game(g: Dict[str, Any]):
             g.get("creator_roll"),
             g.get("opponent_roll"),
             g.get("winner"),
-            int(g.get("finished", False)),
-            g["created_at"].isoformat() if g.get("created_at") else None,
-            g["finished_at"].isoformat() if g.get("finished_at") else None,
+            int(g.get("finished", 0)),
+            # ИЗМЕНЕНИЕ: передаем объект datetime, а не строку
+            g.get("created_at"),
+            g.get("finished_at"),
         )
 
 
-async def get_user_games(uid: int) -> List[Dict[str, Any]]:
-    """Получить завершённые игры пользователя (для истории/статистики)."""
+async def get_user_games(uid: int, limit: int, offset: int) -> List[Dict[str, Any]]:
+    """Вернуть список последних игр пользователя."""
     if not pool:
         return []
     async with pool.acquire() as db:
@@ -51,14 +52,17 @@ async def get_user_games(uid: int) -> List[Dict[str, Any]]:
             SELECT * FROM games
             WHERE (creator_id = $1 OR opponent_id = $1) AND finished = 1
             ORDER BY finished_at DESC
+            LIMIT $2 OFFSET $3
         """,
             uid,
+            limit,
+            offset,
         )
         return [dict(r) for r in records]
 
 
 async def get_all_finished_games() -> List[Dict[str, Any]]:
-    """Получить все завершённые игры (используется редко)."""
+    """Вернуть все завершенные игры."""
     if not pool:
         return []
     async with pool.acquire() as db:
@@ -99,12 +103,9 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         # Игры за 30 дней
         finished_games_records = await db.fetch(
             "SELECT * FROM games WHERE finished = 1 AND finished_at >= $1",
-            delta_30_days.isoformat(),
+            delta_30_days,
         )
-        finished_games = [dict(r) for r in finished_games_records]
-
-        # Все пользователи
-        all_uids_records = await db.fetch("SELECT user_id FROM users")
-        all_uids = [row["user_id"] for row in all_uids_records]
-
-    return finished_games, all_uids
+        # Все user_id
+        user_ids = await db.fetchval("SELECT array_agg(user_id) FROM users")
+        
+        return [dict(r) for r in finished_games_records], user_ids or []
