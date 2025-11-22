@@ -1,10 +1,3 @@
-# app/db/games.py
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Tuple
-
-from .pool import pool
-
-
 async def upsert_game(g: Dict[str, Any]):
     """Создать/обновить игру в таблице games."""
     if not pool:
@@ -13,11 +6,11 @@ async def upsert_game(g: Dict[str, Any]):
         await db.execute(
             """
             INSERT INTO games (
-                creator_id, opponent_id, bet,
+                id, creator_id, opponent_id, bet,
                 creator_roll, opponent_roll, winner,
                 finished, created_at, finished_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             ON CONFLICT(id) DO UPDATE SET
                 creator_id=EXCLUDED.creator_id,
                 opponent_id=EXCLUDED.opponent_id,
@@ -29,6 +22,7 @@ async def upsert_game(g: Dict[str, Any]):
                 created_at=EXCLUDED.created_at,
                 finished_at=EXCLUDED.finished_at
         """,
+            g["id"],                # ← ДОБАВЛЕНО
             g["creator_id"],
             g["opponent_id"],
             g["bet"],
@@ -108,3 +102,4 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         all_uids = [row["user_id"] for row in all_uids_records]
 
     return finished_games, all_uids
+
