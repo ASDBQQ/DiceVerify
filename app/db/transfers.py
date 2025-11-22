@@ -17,5 +17,6 @@ async def add_transfer(from_id: int, to_id: int, amount: int):
             from_id,
             to_id,
             amount,
-            datetime.now(timezone.utc).isoformat(),
+            # ИЗМЕНЕНИЕ: передаем объект datetime, а не строку isoformat()
+            datetime.now(timezone.utc),
         )
