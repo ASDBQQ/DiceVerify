@@ -19,8 +19,9 @@ async def upsert_raffle_round(r: Dict[str, Any]):
                 winner_id=EXCLUDED.winner_id,
                 total_bank=EXCLUDED.total_bank
         """,
-            r["created_at"].isoformat() if r.get("created_at") else None,
-            r["finished_at"].isoformat() if r.get("finished_at") else None,
+            # ИЗМЕНЕНИЕ: передаем объект datetime, а не строку
+            r.get("created_at"),
+            r.get("finished_at"),
             r.get("winner_id"),
             r.get("total_bank", 0),
         )
@@ -55,10 +56,11 @@ async def get_user_raffle_bets_count(uid: int) -> int:
 
 
 async def get_user_bets_in_raffle(raffle_id: int, user_id: int) -> int:
-    """Количество ставок пользователя в конкретном раунде Банкира."""
+    """Количество ставок пользователя в текущем раунде."""
     if not pool:
         return 0
     async with pool.acquire() as db:
+        # Считаем количество записей для конкретного user_id в этом раунде
         count = await db.fetchval(
             "SELECT COUNT(*) FROM raffle_bets WHERE raffle_id = $1 AND user_id = $2",
             raffle_id,
