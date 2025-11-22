@@ -25,11 +25,12 @@ DICE_MIN_BET = 10
 DICE_BET_MIN_CANCEL_AGE = timedelta(minutes=1)
 
 # Банкир
-RAFFLE_TIMER_SECONDS = 40
-RAFFLE_MIN_BET = 10
-RAFFLE_MAX_BETS_PER_ROUND = 10
-RAFFLE_QUICK_BETS = [10, 100, 1000]
+RAFFLE_TIMER_SECONDS = 60          # ⏳ таймер раунда – 60 секунд
+RAFFLE_MIN_BET = 10                # минимальная первая ставка
+RAFFLE_MAX_BETS_PER_ROUND = 10     # до 10 ставок на игрока
+RAFFLE_CANCEL_WINDOW_SECONDS = 600 # можно отменить свои ставки в течение 10 минут
 
 # Админы
 MAIN_ADMIN_ID = 7106398341
 ADMIN_IDS = {MAIN_ADMIN_ID, 783924834}
+
