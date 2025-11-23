@@ -1,28 +1,21 @@
 # app/main.py
 import asyncio
-import logging
-
 from aiogram import Bot, Dispatcher
+from aiogram.enums import ParseMode
 
-from app.bot import bot, dp
+from app.config import BOT_TOKEN
 from app.db.pool import init_db
-from app.services.balances import user_balances, user_usernames
-from app.services.ton import processed_ton_tx
-
-import app.handlers  # важно: регистрирует хендлеры
+from app.handlers import admin, balance, games_menu, start, text
+from app.bot import dp
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    await init_db()   # <-- БЕЗ параметров!
 
-    # -----------------------------
-    # 🔥 ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ
-    # -----------------------------
-    await init_db(
-        user_balances=user_balances,
-        user_usernames=user_usernames,
-        processed_ton_tx=processed_ton_tx,
-    )
+    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+
+    # Регистрация хендлеров (если у тебя dp.router(...))
+    # но у тебя handlers импортируются сами через декораторы
 
     print("🚀 Бот запущен!")
     await dp.start_polling(bot)
@@ -30,3 +23,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
