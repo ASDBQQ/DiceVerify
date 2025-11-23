@@ -47,3 +47,5 @@ async def get_user_registered_at(uid: int) -> Optional[datetime]:
             except ValueError:
                 return None
         return None
+
+
