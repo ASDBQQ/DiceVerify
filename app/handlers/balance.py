@@ -1,4 +1,6 @@
 # app/handlers/balance.py
+from typing import Dict, Any, Optional
+
 from aiogram import F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
@@ -11,19 +13,20 @@ from app.services.balances import (
 )
 from app.services.ton import get_ton_rub_rate
 from app.utils.formatters import format_rubles
+from app.utils.keyboards import bottom_menu
 
-# чтобы при переходе в баланс не мешали “висящие” состояния из игр/банкира
-from app.services.games import pending_bet_input
-from app.services.raffle import pending_raffle_bet_input
+# ---------- СОСТОЯНИЯ (их импортирует text.py) ----------
+
+# вывод TON
+pending_withdraw_step: Dict[int, str] = {}   # "amount" -> ждём сумму, "details" -> ждём реквизиты
+temp_withdraw: Dict[int, Dict[str, Any]] = {}
+
+# перевод ₽
+pending_transfer_step: Dict[int, str] = {}   # "target" -> ждём получателя, "amount_transfer" -> ждём сумму
+temp_transfer: Dict[int, Dict[str, Any]] = {}
 
 
-# состояния для вывода и переводов (используются и в handlers/text.py)
-pending_withdraw_step: dict[int, str] = {}
-temp_withdraw: dict[int, dict] = {}
-
-pending_transfer_step: dict[int, str] = {}
-temp_transfer: dict[int, dict] = {}
-
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 
 async def format_balance_text(uid: int) -> str:
     bal = get_balance(uid)
@@ -36,18 +39,32 @@ async def format_balance_text(uid: int) -> str:
     )
 
 
+def resolve_user_by_username(username_str: str) -> Optional[int]:
+    """
+    Нужна для переводов: ищем user_id по @username.
+    Её вызывает text.py.
+    """
+    uname = username_str.strip().lstrip("@").lower()
+    if not uname:
+        return None
+
+    for uid, stored in user_usernames.items():
+        if stored and stored.lower() == uname:
+            return uid
+    return None
+
+
+# ---------- ГЛАВНОЕ МЕНЮ БАЛАНСА ----------
+
 @dp.message(F.text == "💼 Баланс")
 async def msg_balance(m: types.Message):
     """
-    Главное меню баланса.
-    Сюда попадаем с обычной клавиатуры.
+    Открывает меню баланса по кнопке снизу.
     """
     register_user(m.from_user)
     uid = m.from_user.id
 
-    # при входе в меню баланса чистим состояния игр/банкира/выводов/переводов
-    pending_bet_input.pop(uid, None)
-    pending_raffle_bet_input.pop(uid, None)
+    # при входе в меню баланса сбрасываем состояния вывода/перевода
     pending_withdraw_step.pop(uid, None)
     temp_withdraw.pop(uid, None)
     pending_transfer_step.pop(uid, None)
@@ -60,26 +77,37 @@ async def msg_balance(m: types.Message):
             [InlineKeyboardButton(text="🔄 Перевод", callback_data="transfer_menu")],
             [InlineKeyboardButton(text="💸 Вывод TON", callback_data="withdraw_menu")],
             [InlineKeyboardButton(text="🐼 Помощь", callback_data="help_balance")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="balance_back")],
         ]
     )
     await m.answer(bal_text, reply_markup=kb)
 
 
-# ======================= ПОПОЛНЕНИЕ TON =======================
+@dp.callback_query(F.data == "balance_back")
+async def cb_balance_back(callback: CallbackQuery):
+    """
+    Кнопка «Назад» из меню баланса — возвращает в главное меню с кнопками.
+    """
+    uid = callback.from_user.id
+    pending_withdraw_step.pop(uid, None)
+    temp_withdraw.pop(uid, None)
+    pending_transfer_step.pop(uid, None)
+    temp_transfer.pop(uid, None)
+
+    await callback.message.answer("Главное меню:", reply_markup=bottom_menu())
+    await callback.answer()
+
+
+# ---------- ПОПОЛНЕНИЕ TON ----------
 
 @dp.callback_query(F.data == "deposit_menu")
 async def cb_deposit_menu(callback: CallbackQuery):
     uid = callback.from_user.id
-
-    # на всякий случай тоже подчистим состояния игр/банкира
-    pending_bet_input.pop(uid, None)
-    pending_raffle_bet_input.pop(uid, None)
-
     rate = await get_ton_rub_rate()
     half_ton = int(rate * 0.5)
     one_ton = int(rate * 1)
 
-    ton_url = f"ton://transfer/{TON_WALLET_ADDRESS}?text=ID{uid}"
+    ton_link = f"ton://transfer/{TON_WALLET_ADDRESS}?text=ID{uid}"
 
     text = (
         "💎 Пополнение через TON\n\n"
@@ -95,7 +123,7 @@ async def cb_deposit_menu(callback: CallbackQuery):
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 Открыть кошелёк", url=ton_url)],
+            [InlineKeyboardButton(text="💎 Открыть кошелёк", url=ton_link)],
         ]
     )
 
@@ -103,21 +131,13 @@ async def cb_deposit_menu(callback: CallbackQuery):
     await callback.answer()
 
 
-# ============================ ВЫВОД ============================
+# ---------- ВЫВОД TON (ШАГ 1: ЗАПРОС СУММЫ) ----------
 
 @dp.callback_query(F.data == "withdraw_menu")
 async def cb_withdraw_menu(callback: CallbackQuery):
     uid = callback.from_user.id
-
-    # при начале вывода чистим состояния игр/банкира и старые выводы/переводы
-    pending_bet_input.pop(uid, None)
-    pending_raffle_bet_input.pop(uid, None)
-    pending_withdraw_step.pop(uid, None)
-    temp_withdraw.pop(uid, None)
-    pending_transfer_step.pop(uid, None)
-    temp_transfer.pop(uid, None)
-
     bal = get_balance(uid)
+
     if bal <= 0:
         await callback.answer("Баланс нулевой.", show_alert=True)
         return
@@ -137,19 +157,13 @@ async def cb_withdraw_menu(callback: CallbackQuery):
     await callback.answer()
 
 
-# =========================== ПЕРЕВОД ===========================
+# ---------- ПЕРЕВОД ₽ (ШАГ 1: ВВОД ПОЛУЧАТЕЛЯ) ----------
 
 @dp.callback_query(F.data == "transfer_menu")
 async def cb_transfer_menu(callback: CallbackQuery):
     uid = callback.from_user.id
 
-    # самое главное: гасим режим ввода ставки в кости и банкира
-    pending_bet_input.pop(uid, None)
-    pending_raffle_bet_input.pop(uid, None)
-
-    # и сбрасываем предыдущие попытки перевода/вывода
-    pending_withdraw_step.pop(uid, None)
-    temp_withdraw.pop(uid, None)
+    # сбрасываем старые состояния, если были
     pending_transfer_step[uid] = "target"
     temp_transfer[uid] = {}
 
@@ -161,34 +175,22 @@ async def cb_transfer_menu(callback: CallbackQuery):
     await callback.answer()
 
 
-# ==================== ПОИСК ПОЛУЧАТЕЛЯ ПО @ ===================
-
-def resolve_user_by_username(username_str: str) -> int | None:
-    """
-    Ищем user_id по @username в сохранённом словаре user_usernames.
-    Используется в handlers/text.py.
-    """
-    uname = username_str.strip().lstrip("@").lower()
-    for uid, stored in user_usernames.items():
-        if stored and stored.lower() == uname:
-            return uid
-    return None
-
-
-# ============================ ПОМОЩЬ ===========================
+# ---------- ПОМОЩЬ ПО БАЛАНСУ ----------
 
 @dp.callback_query(F.data == "help_balance")
 async def cb_help_balance(callback: CallbackQuery):
     text = (
-        "💳 *Помощь: Баланс / Вывод*\n\n"
+        "💳 *Помощь: Баланс / Вывод / Перевод*\n\n"
         "• Пополнение через TON.\n"
         "• Средства приходят за 5–30 секунд.\n"
-        "• Комиссия сети оплачивается отправителем.\n"
-        "• Вывод возможен через администратора (заявка уходит в личку админам).\n"
-        "• Переводы работают только между пользователями, которые уже писали боту."
+        "• Вывод осуществляется в TON по заявке администратору.\n"
+        "• Переводы работают только между пользователями, которые уже писали боту.\n"
+        "• Комиссия сети TON оплачивается отправителем."
     )
     await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
+
+
 
 
 
