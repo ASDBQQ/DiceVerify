@@ -19,85 +19,57 @@ async def upsert_game(g: Dict[str, Any]):
             )
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             ON CONFLICT(id) DO UPDATE SET
-                creator_id=EXCLUDED.creator_id,
-                opponent_id=EXCLUDED.opponent_id,
-                bet=EXCLUDED.bet,
-                creator_roll=EXCLUDED.creator_roll,
-                opponent_roll=EXCLUDED.opponent_roll,
-                winner=EXCLUDED.winner,
-                finished=EXCLUDED.finished,
-                created_at=EXCLUDED.created_at,
-                finished_at=EXCLUDED.finished_at
+                creator_id = EXCLUDED.creator_id,
+                opponent_id = EXCLUDED.opponent_id,
+                bet = EXCLUDED.bet,
+                creator_roll = EXCLUDED.creator_roll,
+                opponent_roll = EXCLUDED.opponent_roll,
+                winner = EXCLUDED.winner,
+                finished = EXCLUDED.finished,
+                created_at = EXCLUDED.created_at,
+                finished_at = EXCLUDED.finished_at
         """,
-            g["id"],                # ID игры из RAM
+            g["id"],
             g["creator_id"],
-            g["opponent_id"],
+            g.get("opponent_id"),
             g["bet"],
             g.get("creator_roll"),
             g.get("opponent_roll"),
-            g.get("winner"),
-            int(g.get("finished", False)),
+            str(g.get("winner")) if g.get("winner") is not None else None,
+            1 if g.get("finished") else 0,
             g["created_at"].isoformat() if g.get("created_at") else None,
             g["finished_at"].isoformat() if g.get("finished_at") else None,
         )
 
 
 async def get_user_games(uid: int) -> List[Dict[str, Any]]:
-    """Получить завершённые игры пользователя (для истории/статистики)."""
+    """История игр пользователя (creator или opponent)."""
     if not pool:
         return []
     async with pool.acquire() as db:
         records = await db.fetch(
             """
             SELECT * FROM games
-            WHERE (creator_id = $1 OR opponent_id = $1) AND finished = 1
-            ORDER BY finished_at DESC
+            WHERE creator_id = $1 OR opponent_id = $1
+            ORDER BY created_at DESC
         """,
             uid,
         )
         return [dict(r) for r in records]
 
 
-async def get_all_finished_games() -> List[Dict[str, Any]]:
-    """Получить все завершённые игры (используется редко)."""
-    if not pool:
-        return []
-    async with pool.acquire() as db:
-        records = await db.fetch("SELECT * FROM games WHERE finished = 1")
-        return [dict(r) for r in records]
-
-
-async def get_user_dice_games_count(uid: int, finished_only: bool = True) -> int:
-    """Количество игр пользователя в кости."""
-    if not pool:
-        return 0
-    async with pool.acquire() as db:
-        query = """
-            SELECT COUNT(*) FROM games
-            WHERE (creator_id = $1 OR opponent_id = $1)
-        """
-        params = [uid]
-        if finished_only:
-            query += " AND finished = 1"
-
-        count = await db.fetchval(query, *params)
-        return count if count is not None else 0
-
-
 async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], List[int]]:
     """
-    Используется для рейтинга:
-    - возвращает список ИГР за последние 30 дней
-    - и список всех user_id из таблицы users.
+    Статистика по всем сыгранным играм за последние 30 дней
+    (для рейтинга): прибыль и кол-во игр.
     """
     if not pool:
         return [], []
 
-    now = datetime.now(timezone.utc)
-    delta_30_days = now - timedelta(days=30)
+    delta_30_days = datetime.now(timezone.utc) - timedelta(days=30)
 
     async with pool.acquire() as db:
-        # Игры за 30 дней
+        # Берём все завершённые игры за 30 дней
         finished_games_records = await db.fetch(
             "SELECT * FROM games WHERE finished = 1 AND finished_at >= $1",
             delta_30_days.isoformat(),
@@ -109,8 +81,3 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         all_uids = [row["user_id"] for row in all_uids_records]
 
     return finished_games, all_uids
-
-
-
-
-
