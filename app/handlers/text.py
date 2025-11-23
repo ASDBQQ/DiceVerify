@@ -38,15 +38,16 @@ async def process_text(m: Message):
     text = (m.text or "").strip()
 
     if text.startswith("/"):
-        return
+        return  # игнорируем команды
 
-    # 1) ставка для костей
+    # 1) Кости — ввод ставки
     if pending_bet_input.get(uid):
         if not text.isdigit():
             return await m.answer("Введите корректную ставку (число):")
+
         bet = int(text)
         if bet < DICE_MIN_BET:
-            return await m.answer(f"Минимальная ставка {DICE_MIN_BET} ₽.")
+            return await m.answer(f"Минимальная ставка: {DICE_MIN_BET} ₽.")
         if bet > get_balance(uid):
             return await m.answer("Недостаточно ₽ на балансе!")
 
@@ -71,14 +72,14 @@ async def process_text(m: Message):
         pending_bet_input.pop(uid)
 
         await upsert_game(games[gid])
-
-        await m.answer(f"✅ Игра №{gid} создана!")
+        await m.answer(f"🎲 Игра №{gid} создана!")
         return await send_games_list(m.chat.id, uid)
 
-    # 2) вывод — сумма
+    # 2) ВЫВОД TON — шаг 1: сумма
     if pending_withdraw_step.get(uid) == "amount":
         if not text.isdigit():
             return await m.answer("Введите сумму числом:")
+
         amount = int(text)
         bal = get_balance(uid)
         if amount <= 0:
@@ -87,22 +88,24 @@ async def process_text(m: Message):
             return await m.answer(
                 f"Недостаточно ₽. Ваш баланс: {format_rubles(bal)} ₽."
             )
+
         temp_withdraw[uid]["amount"] = amount
         pending_withdraw_step[uid] = "details"
 
         rate = await get_ton_rub_rate()
         ton_amount = amount / rate if rate > 0 else 0
-        approx = f"{ton_amount:.4f} TON"
+
         return await m.answer(
-            "💸 Вывод в TON\n"
-            f"Сумма: {format_rubles(amount)} ₽ (≈ {approx})\n\n"
-            "Напишите комментарий к выводу (например, удобное время, TON-кошелёк, доп. информация):"
+            "💸 Вывод TON\n"
+            f"Сумма: {format_rubles(amount)} ₽ (≈ {ton_amount:.4f} TON)\n\n"
+            "Напишите комментарий (TON-кошелёк, удобное время и т.д.):"
         )
 
-    # 3) вывод — реквизиты
+    # 3) ВЫВОД TON — шаг 2: комментарий
     if pending_withdraw_step.get(uid) == "details":
         details = text
         amount = temp_withdraw[uid]["amount"]
+
         user = m.from_user
         username = user.username
         if username:
@@ -114,46 +117,47 @@ async def process_text(m: Message):
 
         rate = await get_ton_rub_rate()
         ton_amount = amount / rate if rate > 0 else 0
-        ton_text = f"{ton_amount:.4f} TON"
 
         msg_admin = (
-            "💸 НОВАЯ ЗАЯВКА НА ВЫВОД (TON)\n\n"
+            "💸 НОВАЯ ЗАЯВКА НА ВЫВОД\n\n"
             f"👤 Пользователь: {mention}\n"
-            f"🆔 user_id: {uid}\n"
+            f"🆔 ID: {uid}\n"
             f"🔗 Профиль: {link}\n\n"
             f"💰 Сумма: {format_rubles(amount)} ₽\n"
-            f"💎 Эквивалент: {ton_text}\n"
+            f"💎 Эквивалент: {ton_amount:.4f} TON\n"
             f"📄 Комментарий: {details}\n\n"
-            "После фактической отправки TON уменьшите баланс через /removebalance или /setbalance."
+            "После отправки TON уменьшите баланс через /setbalance."
         )
+
+        # отправка админу
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(admin_id, msg_admin)
-            except Exception:
+            except:
                 pass
 
         await m.answer(
-            "✅ Заявка на вывод отправлена администратору.\n"
-            "После обработки вам отправят TON на указанные реквизиты."
+            "✅ Заявка отправлена!\n"
+            "Администратор свяжется и выполнит вывод."
         )
 
         pending_withdraw_step.pop(uid, None)
         temp_withdraw.pop(uid, None)
         return
 
-        # 4) перевод — выбор получателя
+    # 4) ПЕРЕВОД — шаг 1: получатель
     if pending_transfer_step.get(uid) == "await_username":
-        target_id: int | None = None
+        target_id = None
 
-        # ввод @username
+        # username
         if text.startswith("@"):
             target_id = resolve_user_by_username(text)
 
-        # ввод ID
+        # ID
         elif text.isdigit():
             target_id = int(text)
 
-        # ввод просто текста (username без @)
+        # username без @
         else:
             target_id = resolve_user_by_username(text)
 
@@ -161,7 +165,7 @@ async def process_text(m: Message):
             return await m.answer(
                 "❌ Пользователь не найден.\n"
                 "Убедитесь, что он хотя бы раз писал боту.\n"
-                "Введите его ID или @username."
+                "Введите ID или @username."
             )
 
         if target_id == uid:
@@ -170,61 +174,65 @@ async def process_text(m: Message):
         temp_transfer[uid]["target_id"] = target_id
         pending_transfer_step[uid] = "await_amount"
 
-        return await m.answer("Введите сумму ₽ для перевода (минимум 1):")
+        return await m.answer("Введите сумму ₽ для перевода:")
 
-    # 5) перевод — сумма
+    # 5) ПЕРЕВОД — шаг 2: сумма
     if pending_transfer_step.get(uid) == "await_amount":
         if not text.isdigit():
-            return await m.answer("Введите сумму числом:")
+            return await m.answer("Введите сумму числом!")
+
         amount = int(text)
         if amount <= 0:
-            return await m.answer("Сумма должна быть больше 0.")
+            return await m.answer("Сумма должна быть > 0.")
 
         bal = get_balance(uid)
         if amount > bal:
             return await m.answer(
-                f"Недостаточно ₽. Ваш баланс: {format_rubles(bal)} ₽."
+                f"Недостаточно ₽! Ваш баланс: {format_rubles(bal)} ₽."
             )
 
-        target_id = temp_transfer[uid].get("target_id")
-        if not target_id:
-            pending_transfer_step.pop(uid, None)
-            temp_transfer.pop(uid, None)
-            return await m.answer("Ошибка: получатель не найден, начните заново.")
+        target_id = temp_transfer[uid]["target_id"]
 
+        # проводим перевод
         change_balance(uid, -amount)
         change_balance(target_id, amount)
 
         await add_transfer(uid, target_id, amount)
 
+        # отправителю
         await m.answer(
-            "✅ Перевод выполнен.\n"
+            "✅ Перевод выполнен!\n"
             f"Вы отправили {format_rubles(amount)} ₽ пользователю ID {target_id}.\n"
-            f"Ваш новый баланс: {format_rubles(get_balance(uid))} ₽."
+            f"Ваш баланс: {format_rubles(get_balance(uid))} ₽."
         )
 
+        # получателю
         try:
             await bot.send_message(
                 target_id,
-                f"🔄 Вам перевели {format_rubles(amount)} ₽ от пользователя ID {uid}.\n"
-                f"Ваш новый баланс: {format_rubles(get_balance(target_id))} ₽.",
+                f"💸 Вам перевели {format_rubles(amount)} ₽ от пользователя ID {uid}.\n"
+                f"Баланс: {format_rubles(get_balance(target_id))} ₽."
             )
-        except Exception:
+        except:
             pass
 
         pending_transfer_step.pop(uid, None)
         temp_transfer.pop(uid, None)
         return
 
-
-    # 6) ввод суммы для Банкира
+    # 6) Банкир — ставка
     if pending_raffle_bet_input.get(uid):
         if not text.isdigit():
-            return await m.answer("Введите сумму числом (₽) для участия в Банкире:")
+            return await m.answer("Введите сумму числом (₽):")
+
         amount = int(text)
         pending_raffle_bet_input.pop(uid, None)
-        msg_text = await _process_raffle_bet(uid, m.chat.id, amount)
-        return await m.answer(msg_text)
 
+        msg = await _process_raffle_bet(uid, m.chat.id, amount)
+        return await m.answer(msg)
+
+    # если ничего не подходит
     await m.answer("Используйте меню или /start.")
+
+
 
