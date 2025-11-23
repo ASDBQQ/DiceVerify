@@ -1,14 +1,24 @@
 # app/db/games.py
 
 from typing import Dict, Any, List
-from datetime import datetime
-from app.db.pool import pool
+import app.db.pool as db_pool  # ⬅ импортируем МОДУЛЬ, а не переменную
+
+
+def _get_pool():
+    """
+    Вспомогательная функция, чтобы красиво падать,
+    если init_db ещё не был вызван.
+    """
+    if db_pool.pool is None:
+        raise RuntimeError("Database pool is not initialized. Call init_db() before using DB.")
+    return db_pool.pool
 
 
 # -------------------------------------------
 # СОХРАНЕНИЕ/ОБНОВЛЕНИЕ ИГР
 # -------------------------------------------
 async def upsert_game(g: Dict[str, Any]):
+    pool = _get_pool()
     async with pool.acquire() as db:
         await db.execute(
             """
@@ -30,9 +40,16 @@ async def upsert_game(g: Dict[str, Any]):
                 created_at = EXCLUDED.created_at,
                 finished_at = EXCLUDED.finished_at
             """,
-            g["id"], g["creator_id"], g["opponent_id"], g["bet"],
-            g["creator_roll"], g["opponent_roll"], g["winner"],
-            g["finished"], g["created_at"], g["finished_at"]
+            g["id"],
+            g["creator_id"],
+            g["opponent_id"],
+            g["bet"],
+            g["creator_roll"],
+            g["opponent_roll"],
+            g["winner"],
+            g["finished"],
+            g["created_at"],
+            g["finished_at"],
         )
 
 
@@ -40,6 +57,7 @@ async def upsert_game(g: Dict[str, Any]):
 # ИСТОРИЯ ИГР ПОЛЬЗОВАТЕЛЯ
 # -------------------------------------------
 async def get_user_games(uid: int) -> List[Dict[str, Any]]:
+    pool = _get_pool()
     async with pool.acquire() as db:
         rows = await db.fetch(
             """
@@ -57,6 +75,7 @@ async def get_user_games(uid: int) -> List[Dict[str, Any]]:
 # КОЛ-ВО ИГР ДЛЯ ПРОФИЛЯ
 # -------------------------------------------
 async def get_user_dice_games_count(uid: int) -> int:
+    pool = _get_pool()
     async with pool.acquire() as db:
         row = await db.fetchrow(
             """
@@ -73,6 +92,7 @@ async def get_user_dice_games_count(uid: int) -> int:
 # РЕЙТИНГ (прибыль за 30 дней)
 # -------------------------------------------
 async def get_users_profit_and_games_30_days() -> List[Dict[str, Any]]:
+    pool = _get_pool()
     async with pool.acquire() as db:
         rows = await db.fetch(
             """
@@ -92,9 +112,10 @@ async def get_users_profit_and_games_30_days() -> List[Dict[str, Any]]:
 
 
 # -------------------------------------------
-# ВЫГРУЗКА ВСЕХ ЗАВЕРШЕННЫХ ИГР (для статистики / возможно будущего)
+# ВЫГРУЗКА ВСЕХ ЗАВЕРШЕННЫХ ИГР
 # -------------------------------------------
 async def get_all_finished_games():
+    pool = _get_pool()
     async with pool.acquire() as db:
         rows = await db.fetch(
             """
@@ -105,4 +126,5 @@ async def get_all_finished_games():
             """
         )
         return [dict(r) for r in rows]
+
 
