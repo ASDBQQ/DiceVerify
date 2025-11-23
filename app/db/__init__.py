@@ -3,11 +3,10 @@
 from .pool import init_db, pool
 from .users import upsert_user, get_user_registered_at
 from .games import (
-    upsert_game,
     get_user_games,
-    get_all_finished_games,
-    get_user_dice_games_count,
     get_users_profit_and_games_30_days,
+    get_user_dice_games_count,
+    upsert_game,
 )
 from .raffle import (
     upsert_raffle_round,
@@ -35,3 +34,4 @@ __all__ = [
     "add_ton_deposit",
     "add_transfer",
 ]
+
