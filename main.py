@@ -1,21 +1,32 @@
 # app/main.py
 import asyncio
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 
-from app.config import BOT_TOKEN
+from app.bot import bot, dp
 from app.db.pool import init_db
-from app.handlers import admin, balance, games_menu, start, text
-from app.bot import dp
+
+# Импортируем все роутеры
+from app.handlers import (
+    start,
+    games_menu,
+    balance,
+    admin,
+    text,
+)
+from app.handlers import profile   # <<< ВАЖНО: подключаем профиль
 
 
 async def main():
-    await init_db()   # <-- БЕЗ параметров!
+    # Инициализация базы данных
+    await init_db()
 
-    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-
-    # Регистрация хендлеров (если у тебя dp.router(...))
-    # но у тебя handlers импортируются сами через декораторы
+    # Подключаем обработчики
+    dp.include_router(start.router)
+    dp.include_router(games_menu.router)
+    dp.include_router(balance.router)
+    dp.include_router(admin.router)
+    dp.include_router(profile.router)  # <<< ВОТ ЭТОГО НЕ ХВАТАЛО!
+    dp.include_router(text.router)
 
     print("🚀 Бот запущен!")
     await dp.start_polling(bot)
@@ -23,4 +34,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
