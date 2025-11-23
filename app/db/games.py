@@ -81,24 +81,3 @@ async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], Li
         all_uids = [row["user_id"] for row in all_uids_records]
 
     return finished_games, all_uids
-    
-# Получить все завершённые игры (для расчёта рейтингов)
-async def get_all_finished_games():
-    rows = await db.fetch(
-        """
-        SELECT
-            id,
-            creator_id,
-            opponent_id,
-            bet,
-            creator_roll,
-            opponent_roll,
-            winner,
-            finished_at
-        FROM games
-        WHERE finished = TRUE
-        """
-    )
-    return rows
-
-
