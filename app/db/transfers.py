@@ -16,9 +16,9 @@ async def add_transfer(sender_id: int, receiver_id: int, amount: int) -> None:
     async with pool.acquire() as db:
         await db.execute(
             """
-            INSERT INTO transfers (sender_id, receiver_id, amount, created_at)
+            INSERT INTO transfers (from_id, to_id, amount, at)
             VALUES ($1, $2, $3, $4)
-            """,
+        """,
             sender_id,
             receiver_id,
             amount,
@@ -28,7 +28,7 @@ async def add_transfer(sender_id: int, receiver_id: int, amount: int) -> None:
 
 async def get_user_transfers(uid: int) -> List[Dict[str, Any]]:
     """
-    История переводов пользователя (на всякий случай, может пригодиться потом).
+    Получить список переводов пользователя (как отправитель или получатель).
     """
     if not pool:
         return []
@@ -43,4 +43,6 @@ async def get_user_transfers(uid: int) -> List[Dict[str, Any]]:
             uid,
         )
         return [dict(r) for r in rows]
+
+
 
