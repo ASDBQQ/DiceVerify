@@ -2,6 +2,10 @@ import asyncio
 
 from app.bot import bot, dp
 from app.db.pool import init_db
+from app.services.balances import user_balances, user_usernames
+from app.services.ton import processed_ton_tx
+
+await init_db(user_balances, user_usernames, processed_ton_tx)
 
 # Просто импортируем файлы — хендлеры сами регистрируются через dp
 import app.handlers.start
@@ -19,6 +23,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
