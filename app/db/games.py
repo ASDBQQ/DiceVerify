@@ -1,14 +1,14 @@
 # app/db/games.py
-from typing import Dict, Any, List, Tuple
-from datetime import datetime, timedelta, timezone
 
+from typing import Dict, Any, List
+from datetime import datetime
 from app.db.pool import pool
 
 
+# -------------------------------------------
+# СОХРАНЕНИЕ/ОБНОВЛЕНИЕ ИГР
+# -------------------------------------------
 async def upsert_game(g: Dict[str, Any]):
-    """Создать/обновить игру в таблице games."""
-    if not pool:
-        return
     async with pool.acquire() as db:
         await db.execute(
             """
@@ -16,9 +16,10 @@ async def upsert_game(g: Dict[str, Any]):
                 id, creator_id, opponent_id, bet,
                 creator_roll, opponent_roll, winner,
                 finished, created_at, finished_at
+            ) VALUES (
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-            ON CONFLICT(id) DO UPDATE SET
+            ON CONFLICT (id) DO UPDATE SET
                 creator_id = EXCLUDED.creator_id,
                 opponent_id = EXCLUDED.opponent_id,
                 bet = EXCLUDED.bet,
@@ -28,56 +29,80 @@ async def upsert_game(g: Dict[str, Any]):
                 finished = EXCLUDED.finished,
                 created_at = EXCLUDED.created_at,
                 finished_at = EXCLUDED.finished_at
-        """,
-            g["id"],
-            g["creator_id"],
-            g.get("opponent_id"),
-            g["bet"],
-            g.get("creator_roll"),
-            g.get("opponent_roll"),
-            str(g.get("winner")) if g.get("winner") is not None else None,
-            1 if g.get("finished") else 0,
-            g["created_at"].isoformat() if g.get("created_at") else None,
-            g["finished_at"].isoformat() if g.get("finished_at") else None,
+            """,
+            g["id"], g["creator_id"], g["opponent_id"], g["bet"],
+            g["creator_roll"], g["opponent_roll"], g["winner"],
+            g["finished"], g["created_at"], g["finished_at"]
         )
 
 
+# -------------------------------------------
+# ИСТОРИЯ ИГР ПОЛЬЗОВАТЕЛЯ
+# -------------------------------------------
 async def get_user_games(uid: int) -> List[Dict[str, Any]]:
-    """История игр пользователя (creator или opponent)."""
-    if not pool:
-        return []
     async with pool.acquire() as db:
-        records = await db.fetch(
+        rows = await db.fetch(
             """
-            SELECT * FROM games
+            SELECT *
+            FROM games
             WHERE creator_id = $1 OR opponent_id = $1
-            ORDER BY created_at DESC
-        """,
+            ORDER BY id DESC
+            """,
             uid,
         )
-        return [dict(r) for r in records]
+        return [dict(r) for r in rows]
 
 
-async def get_users_profit_and_games_30_days() -> Tuple[List[Dict[str, Any]], List[int]]:
-    """
-    Статистика по всем сыгранным играм за последние 30 дней
-    (для рейтинга): прибыль и кол-во игр.
-    """
-    if not pool:
-        return [], []
-
-    delta_30_days = datetime.now(timezone.utc) - timedelta(days=30)
-
+# -------------------------------------------
+# КОЛ-ВО ИГР ДЛЯ ПРОФИЛЯ
+# -------------------------------------------
+async def get_user_dice_games_count(uid: int) -> int:
     async with pool.acquire() as db:
-        # Берём все завершённые игры за 30 дней
-        finished_games_records = await db.fetch(
-            "SELECT * FROM games WHERE finished = 1 AND finished_at >= $1",
-            delta_30_days.isoformat(),
+        row = await db.fetchrow(
+            """
+            SELECT COUNT(*) AS c
+            FROM games
+            WHERE finished = TRUE AND (creator_id = $1 OR opponent_id = $1)
+            """,
+            uid,
         )
-        finished_games = [dict(r) for r in finished_games_records]
+        return row["c"] if row else 0
 
-        # Все пользователи
-        all_uids_records = await db.fetch("SELECT user_id FROM users")
-        all_uids = [row["user_id"] for row in all_uids_records]
 
-    return finished_games, all_uids
+# -------------------------------------------
+# РЕЙТИНГ (прибыль за 30 дней)
+# -------------------------------------------
+async def get_users_profit_and_games_30_days() -> List[Dict[str, Any]]:
+    async with pool.acquire() as db:
+        rows = await db.fetch(
+            """
+            SELECT
+                u.user_id,
+                COALESCE(SUM(g.profit), 0) AS profit,
+                COUNT(g.id) AS games
+            FROM users u
+            LEFT JOIN games g ON g.winner = u.user_id 
+                AND g.finished = TRUE
+                AND g.finished_at >= NOW() - INTERVAL '30 days'
+            GROUP BY u.user_id
+            ORDER BY profit DESC
+            """
+        )
+        return [dict(r) for r in rows]
+
+
+# -------------------------------------------
+# ВЫГРУЗКА ВСЕХ ЗАВЕРШЕННЫХ ИГР (для статистики / возможно будущего)
+# -------------------------------------------
+async def get_all_finished_games():
+    async with pool.acquire() as db:
+        rows = await db.fetch(
+            """
+            SELECT *
+            FROM games
+            WHERE finished = TRUE
+            ORDER BY id DESC
+            """
+        )
+        return [dict(r) for r in rows]
+
