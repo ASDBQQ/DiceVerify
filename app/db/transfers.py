@@ -1,21 +1,46 @@
 # app/db/transfers.py
 from datetime import datetime, timezone
+from typing import Dict, Any, List
 
-from .pool import pool
+from app.db.pool import pool
 
 
-async def add_transfer(from_id: int, to_id: int, amount: int):
-    """Сохранить перевод между пользователями."""
+async def add_transfer(sender_id: int, receiver_id: int, amount: int) -> None:
+    """
+    Сохраняет перевод в таблицу transfers.
+    Вызывается из handlers/text.py
+    """
     if not pool:
         return
+
     async with pool.acquire() as db:
         await db.execute(
             """
-            INSERT INTO transfers (from_id, to_id, amount, at)
+            INSERT INTO transfers (sender_id, receiver_id, amount, created_at)
             VALUES ($1, $2, $3, $4)
-        """,
-            from_id,
-            to_id,
+            """,
+            sender_id,
+            receiver_id,
             amount,
             datetime.now(timezone.utc).isoformat(),
         )
+
+
+async def get_user_transfers(uid: int) -> List[Dict[str, Any]]:
+    """
+    История переводов пользователя (на всякий случай, может пригодиться потом).
+    """
+    if not pool:
+        return []
+
+    async with pool.acquire() as db:
+        rows = await db.fetch(
+            """
+            SELECT * FROM transfers
+            WHERE sender_id = $1 OR receiver_id = $1
+            ORDER BY created_at DESC
+            """,
+            uid,
+        )
+        return [dict(r) for r in rows]
+
