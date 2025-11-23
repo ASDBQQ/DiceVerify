@@ -2,25 +2,28 @@
 import asyncio
 
 from app.bot import bot, dp
-from app.db.pool import init_db
 from app.services.balances import user_balances, user_usernames
-from app.services.ton import ton_deposit_worker, processed_ton_tx
+from app.services.ton import processed_ton_tx
+from app.db.pool import init_db
 
-# Импортируем хендлеры (они регистрируются через декораторы)
-from app.handlers import (
-    start, profile, balance, admin,
-    games_menu, raffle_menu, text
-)  # noqa: F401
+# Хендлеры просто импортируются, они сами регистрируются внутри dp
+import app.handlers.start
+import app.handlers.games_menu
+import app.handlers.balance
+import app.handlers.admin
+import app.handlers.profile
+import app.handlers.text
 
 
 async def main():
-    print("🚀 Бот запущен!")
-
-    # Инициализация базы
+    # ❗ ВОТ ТАК ДОЛЖНО БЫТЬ
     await init_db(user_balances, user_usernames, processed_ton_tx)
 
-    # TON-пополнения — запускаем воркер
-    asyncio.create_task(ton_deposit_worker())
-
-    # Старт polling
+    print("🚀 Бот запущен!")
     await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
